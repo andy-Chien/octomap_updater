@@ -355,6 +355,5 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     pcd_modifier.resize(filtered_cloud_size);
     filtered_cloud_publisher_.publish(*filtered_cloud);
   }
-  ROS_INFO("RUN TO END");
 }
 }  // namespace occupancy_map_monitor
