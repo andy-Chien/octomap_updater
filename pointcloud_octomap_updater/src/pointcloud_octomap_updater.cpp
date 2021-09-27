@@ -107,11 +107,11 @@ void PointCloudOctomapUpdaterFast::start()
   if (point_cloud_subscriber_)
     return;
   /* subscribe to point cloud topic using tf filter*/
-  point_cloud_subscriber_ = new message_filters::Subscriber<sensor_msgs::PointCloud2>(root_nh_, point_cloud_topic_, 5);
+  point_cloud_subscriber_ = new message_filters::Subscriber<sensor_msgs::PointCloud2>(root_nh_, point_cloud_topic_, 1);
   if (tf_listener_ && tf_buffer_ && !monitor_->getMapFrame().empty())
   {
     point_cloud_filter_ = new tf2_ros::MessageFilter<sensor_msgs::PointCloud2>(*point_cloud_subscriber_, *tf_buffer_,
-                                                                               monitor_->getMapFrame(), 5, root_nh_);
+                                                                               monitor_->getMapFrame(), 1, root_nh_);
     point_cloud_filter_->registerCallback(boost::bind(&PointCloudOctomapUpdaterFast::cloudMsgCallback, this, _1));
     ROS_INFO("Listening to '%s' using message filter with target frame '%s'", point_cloud_topic_.c_str(),
              point_cloud_filter_->getTargetFramesString().c_str());
@@ -171,6 +171,10 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
 {
   ROS_DEBUG("Received a new point cloud message");
   ros::WallTime start = ros::WallTime::now();
+  ros::WallTime mid;
+  ros::WallTime mid1;
+  ros::WallTime mid2;
+  ros::WallTime mid3;
 
   if (max_update_rate_ > 0)
   {
@@ -206,7 +210,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     else
       return;
   }
-
   /* compute sensor origin in map frame */
   const tf2::Vector3& sensor_origin_tf = map_h_sensor.getOrigin();
   octomap::point3d sensor_origin(sensor_origin_tf.getX(), sensor_origin_tf.getY(), sensor_origin_tf.getZ());
@@ -216,8 +219,11 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     return;
 
   /* mask out points on the robot */
+  mid1 = ros::WallTime::now();
   shape_mask_->maskContainment(*cloud_msg, sensor_origin_eigen, 0.0, max_range_, mask_);
+  mid2 = ros::WallTime::now();
   updateMask(*cloud_msg, sensor_origin_eigen, mask_);
+  mid = ros::WallTime::now();
 
   octomap::KeySet free_cells, occupied_cells, model_cells, clip_cells;
   std::unique_ptr<sensor_msgs::PointCloud2> filtered_cloud;
@@ -243,6 +249,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     iter_filtered_z.reset(new sensor_msgs::PointCloud2Iterator<float>(*filtered_cloud, "z"));
   }
   size_t filtered_cloud_size = 0;
+
 
   tree_->lockRead();
 
@@ -292,6 +299,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
         }
       }
     }
+
 
     /* compute the free cells along each ray that ends at an occupied cell */
     for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
@@ -346,7 +354,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     ROS_ERROR("Internal error while updating octree");
   }
   tree_->unlockWrite();
-  ROS_DEBUG("Processed point cloud in %lf ms", (ros::WallTime::now() - start).toSec() * 1000.0);
+  ROS_INFO("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid1 - start).toSec() * 1000.0,  (mid2 - mid1).toSec() * 1000.0, (mid - mid2).toSec() * 1000.0, (ros::WallTime::now() - mid).toSec() * 1000.0);
   tree_->triggerUpdateCallback();
 
   if (filtered_cloud)
