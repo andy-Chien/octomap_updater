@@ -115,6 +115,8 @@ void point_containment_filter::ShapeMask::maskContainment(const sensor_msgs::Poi
                                                           const double min_sensor_dist, const double max_sensor_dist,
                                                           std::vector<int>& mask)
 {
+  ros::Time a1, a2, a3, a4, a5;
+  a1 = ros::Time::now();
   boost::mutex::scoped_lock _(shapes_lock_);
   const unsigned int np = data_in.data.size() / data_in.point_step;
   mask.resize(np);
@@ -170,6 +172,7 @@ void point_containment_filter::ShapeMask::maskContainment(const sensor_msgs::Poi
             out = INSIDE;
       mask[i] = out;
     }
+    // std::cout<<"a1 time = "<<(a3 - a2).toSec() * 1000<<" ms, a2 time = "<<(a5 - a4).toSec() * 1000<<" ms, point size = "<<np<<", body size = "<<bodies_.size()<<std::endl;
   }
 }
 

@@ -175,6 +175,9 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   ros::WallTime mid1;
   ros::WallTime mid2;
   ros::WallTime mid3;
+  ros::WallTime mid4;
+  ros::WallTime mid5;
+  ros::WallTime mid6;
 
   if (max_update_rate_ > 0)
   {
@@ -219,14 +222,12 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     return;
 
   /* mask out points on the robot */
-  mid1 = ros::WallTime::now();
   shape_mask_->maskContainment(*cloud_msg, sensor_origin_eigen, 0.0, max_range_, mask_);
-  mid2 = ros::WallTime::now();
   updateMask(*cloud_msg, sensor_origin_eigen, mask_);
-  mid = ros::WallTime::now();
 
   octomap::KeySet free_cells, occupied_cells, model_cells, clip_cells;
   std::unique_ptr<sensor_msgs::PointCloud2> filtered_cloud;
+  std::unique_ptr<sensor_msgs::PointCloud2> filtered_cloud_;
 
   // We only use these iterators if we are creating a filtered_cloud for
   // publishing. We cannot default construct these, so we use unique_ptr's
@@ -300,7 +301,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
       }
     }
 
-
     /* compute the free cells along each ray that ends at an occupied cell */
     for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
       if (tree_->computeRayKeys(sensor_origin, tree_->keyToCoord(*it), key_ray_))
@@ -354,7 +354,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     ROS_ERROR("Internal error while updating octree");
   }
   tree_->unlockWrite();
-  ROS_INFO("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid1 - start).toSec() * 1000.0,  (mid2 - mid1).toSec() * 1000.0, (mid - mid2).toSec() * 1000.0, (ros::WallTime::now() - mid).toSec() * 1000.0);
+  ROS_DEBUG("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid5 - mid).toSec() * 1000.0,  (mid3 - mid5).toSec() * 1000.0, (mid4 - mid3).toSec() * 1000.0, (ros::WallTime::now() - mid4).toSec() * 1000.0);
   tree_->triggerUpdateCallback();
 
   if (filtered_cloud)
