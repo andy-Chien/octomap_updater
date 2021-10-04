@@ -43,9 +43,24 @@
 #include <message_filters/subscriber.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <moveit/occupancy_map_monitor/occupancy_map_updater.h>
+#include <gpu_voxels/GpuVoxels.h>
+#include <gpu_voxels/helpers/MetaPointCloud.h>
+#include <gpu_voxels/robot/urdf_robot/urdf_robot.h>
+#include <gpu_voxels/logging/logging_gpu_voxels.h>
+#include <gpu_voxels/helpers/GeometryGeneration.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl/point_types.h>
+#include <icl_core_config/Config.h>
 #include "octomap_updater/point_containment_filter/shape_mask.h"
 
 #include <memory>
+
+using boost::dynamic_pointer_cast;
+using boost::shared_ptr;
+using gpu_voxels::voxelmap::ProbVoxelMap;
+using gpu_voxels::voxelmap::DistanceVoxelMap;
+using gpu_voxels::voxellist::CountingVoxelList;
+using gpu_voxels::voxellist::BitVectorVoxelList;
 
 namespace occupancy_map_monitor
 {
@@ -66,10 +81,11 @@ public:
 protected:
   virtual void updateMask(const sensor_msgs::PointCloud2& cloud, const Eigen::Vector3d& sensor_origin,
                           std::vector<int>& mask);
-
+  void updateShapeMask();
 private:
   bool getShapeTransform(ShapeHandle h, Eigen::Isometry3d& transform) const;
   void cloudMsgCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
+  void gvlInitialize();
   void stopHelper();
 
   ros::NodeHandle root_nh_;
@@ -82,6 +98,8 @@ private:
 
   /* params */
   std::string point_cloud_topic_;
+  std::string robot_state_topic_;
+  std::string urdf_path_;
   double scale_;
   double padding_;
   double max_range_;
@@ -89,6 +107,7 @@ private:
   double max_update_rate_;
   std::string filtered_cloud_topic_;
   ros::Publisher filtered_cloud_publisher_;
+  ros::Subscriber robot_state_subscriber;
 
   message_filters::Subscriber<sensor_msgs::PointCloud2>* point_cloud_subscriber_;
   tf2_ros::MessageFilter<sensor_msgs::PointCloud2>* point_cloud_filter_;
@@ -99,6 +118,19 @@ private:
 
   std::unique_ptr<point_containment_filter::ShapeMask> shape_mask_;
   std::vector<int> mask_;
+
+  shared_ptr<GpuVoxels> gvl;
+  Vector3ui map_dimensions;
+  float voxel_side_length;
+  PointCloud my_point_cloud;
+  robot::JointValueMap myRobotJointValues;
+  Matrix4f tf;
+  shared_ptr<CountingVoxelList> pointCloudVoxelList;
+  shared_ptr<BitVectorVoxelList> maskVoxelList;
+  ShapeHandle next_handle_;
+  std::map<ShapeHandle, shapes::Shape*> contain_shape_;
+  std::map<ShapeHandle, Eigen::Isometry3d> shapes_transform_;
+  std::map<ShapeHandle, Eigen::Isometry3d> tmp_shapes_transform_;
 };
 }  // namespace occupancy_map_monitor
 

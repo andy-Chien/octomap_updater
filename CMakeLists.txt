@@ -37,7 +37,13 @@ find_package(catkin REQUIRED COMPONENTS
   moveit_ros_occupancy_map_monitor
   moveit_ros_planning
   nodelet
+  pcl_ros
+  pcl_conversions
 )
+
+find_package(CUDA REQUIRED)
+find_package(icl_core REQUIRED )
+find_package(gpu_voxels REQUIRED)
 
 find_package(Eigen3 REQUIRED)
 find_package(OpenMP REQUIRED)
@@ -70,12 +76,19 @@ catkin_package(
     EIGEN3
 )
 
+add_definitions(
+  ${icl_core_DEFINITIONS}
+  ${gpu_voxels_DEFINITIONS}
+)
+
 include_directories(
                     point_containment_filter/include
                     pointcloud_octomap_updater/include
                     ${octomap_updater_GL_INCLUDE_DIRS}
                     ${Boost_INCLUDE_DIRS}
                     ${catkin_INCLUDE_DIRS}
+                    ${gpu_voxels_INCLUDE_DIRS}
+                    ${CUDA_INCLUDE_DIRS}
                     )
 include_directories(SYSTEM
                     ${OpenCV_INCLUDE_DIRS}
