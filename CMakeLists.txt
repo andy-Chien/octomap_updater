@@ -48,6 +48,8 @@ find_package(gpu_voxels REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(OpenCV)
+find_package(VTK)
+find_package(PCL REQUIRED)
 
 set(PACKAGE_LIBRARIES
   moveit_point_containment_filter
@@ -81,6 +83,7 @@ add_definitions(
   ${gpu_voxels_DEFINITIONS}
 )
 
+message("PCL_INCLUDE_DIRS ${PCL_INCLUDE_DIRS}")
 include_directories(
                     point_containment_filter/include
                     pointcloud_octomap_updater/include
@@ -89,7 +92,10 @@ include_directories(
                     ${catkin_INCLUDE_DIRS}
                     ${gpu_voxels_INCLUDE_DIRS}
                     ${CUDA_INCLUDE_DIRS}
+                    ${VTK_INCLUDE_DIRS}
+                    ${PCL_INCLUDE_DIRS}
                     )
+
 include_directories(SYSTEM
                     ${OpenCV_INCLUDE_DIRS}
                     ${EIGEN3_INCLUDE_DIRS}
