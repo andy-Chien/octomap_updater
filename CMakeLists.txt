@@ -6,6 +6,7 @@ if(NOT "${CMAKE_CXX_STANDARD}")
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+list(APPEND CMAKE_PREFIX_PATH "~/libgvl")
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -108,7 +109,7 @@ add_subdirectory(pointcloud_octomap_updater)
 
 install(
   FILES
-    pointcloud_octomap_updater_plugin_description.xml
+    pointcloud_octomap_updater_fast_description.xml
     moveit_depth_self_filter.xml
   DESTINATION
     ${CATKIN_PACKAGE_SHARE_DESTINATION})

@@ -35,6 +35,8 @@
 /* Author: Ioan Sucan */
 
 #include <class_loader/class_loader.hpp>
+// #include <pluginlib/class_list_macros.h>
 #include "octomap_updater/pointcloud_octomap_updater/pointcloud_octomap_updater.h"
 
 CLASS_LOADER_REGISTER_CLASS(occupancy_map_monitor::PointCloudOctomapUpdaterFast, occupancy_map_monitor::OccupancyMapUpdater)
+// PLUGINLIB_EXPORT_CLASS(occupancy_map_monitor::PointCloudOctomapUpdaterFast, occupancy_map_monitor::OccupancyMapUpdater)

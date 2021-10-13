@@ -95,6 +95,7 @@ bool PointCloudOctomapUpdaterFast::setParams(XmlRpc::XmlRpcValue& params)
 
 bool PointCloudOctomapUpdaterFast::initialize()
 {
+  next_handle_ = 0;
   tf_buffer_.reset(new tf2_ros::Buffer());
   tf_listener_.reset(new tf2_ros::TransformListener(*tf_buffer_, root_nh_));
   shape_mask_.reset(new point_containment_filter::ShapeMask());
@@ -187,12 +188,123 @@ ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstP
 {
   ShapeHandle h = 0;
   if (shape_mask_)
+  {
     // h = shape_mask_->addShape(shape, scale_, padding_);
     h = next_handle_;
     next_handle_ += 1;
     contain_shape_.insert(std::pair<ShapeHandle, shapes::Shape*>(h, shape->clone()));
     shapes_transform_.insert(std::pair<ShapeHandle, Eigen::Isometry3d>(h, Eigen::Isometry3d(Eigen::Isometry3d::Identity())));
     tmp_shapes_transform_.insert(std::pair<ShapeHandle, Eigen::Isometry3d>(h, Eigen::Isometry3d(Eigen::Isometry3d::Identity())));
+
+    float side_length;
+    gvl->getVoxelSideLength(side_length);
+    float delta = side_length / 1.0f;
+    for(auto it = contain_shape_.begin(); it != contain_shape_.end(); ++it)
+    {
+      if(it->second->type == shapes::BOX)
+      { 
+        ROS_DEBUG("Into updateShapeMask shapes::BOX");
+        const double *size = static_cast<const shapes::Box*>(it->second)->size;
+        Vector3f center_min = Vector3f(-1*size[0]/2, -1*size[1]/2, -1*size[2]/2);
+        Vector3f center_max = Vector3f(size[0]/2, size[1]/2, size[2]/2);
+        std::vector<Vector3f> box_coordinates = geometry_generation::createBoxOfPoints(center_min, center_max, delta);
+        cloud_vector.push_back(box_coordinates);
+        // maskVoxelList->insertCoordinateList(box_coordinates, eBVM_OCCUPIED);
+        ROS_DEBUG("Into updateShapeMask shapes::BOX end");
+      }
+      else if(it->second->type == shapes::SPHERE)
+      {
+        ROS_DEBUG("Into updateShapeMask shapes::SPHERE");
+        double sphere_radius = static_cast<const shapes::Sphere*>(it->second)->radius;
+        Vector3f sphere_center = Vector3f(0, 0, 0);
+        std::vector<Vector3f> sphere_coordinates = geometry_generation::createSphereOfPoints(sphere_center, sphere_radius, delta);
+        cloud_vector.push_back(sphere_coordinates);
+        // maskVoxelList->insertCoordinateList(sphere_coordinates, eBVM_OCCUPIED);
+        ROS_DEBUG("Into updateShapeMask shapes::SPHERE end");
+      }
+      else if(it->second->type == shapes::CYLINDER)
+      {
+        ROS_DEBUG("Into updateShapeMask shapes::CYLINDER");
+        double cylinder_radius = static_cast<const shapes::Cylinder*>(it->second)->radius;
+        double cylinder_length = static_cast<const shapes::Cylinder*>(it->second)->length;
+        Vector3f cylinder_center = Vector3f(0, 0, 0);
+        std::vector<Vector3f> cylinder_coordinates = geometry_generation::createCylinderOfPoints(cylinder_center, cylinder_radius, cylinder_length, delta);
+        cloud_vector.push_back(cylinder_coordinates);
+        // maskVoxelList->insertCoordinateList(cylinder_coordinates, eBVM_OCCUPIED);
+        ROS_DEBUG("Into updateShapeMask shapes::CYLINDER end");
+      }
+      else if(it->second->type == shapes::MESH)
+      {
+        ROS_ERROR("Into updateShapeMask shapes::MESH");
+        pcl::PolygonMesh polygon_mesh;
+
+        // sensor_msgs::PointCloud2Modifier pcd_modifier(polygon_mesh.cloud);
+
+        // size_t size = sizeof(static_cast<const shapes::Mesh*>(it->second)->vertices) / sizeof(double) / 3;
+        
+        // pcd_modifier.resize(size);
+
+        // std::cout << "polys: " << sizeof(static_cast<const shapes::Mesh*>(it->second)->triangles)/sizeof(unsigned int) << " vertices: " << pcd_modifier.size() << "\n";
+
+        // sensor_msgs::PointCloud2ConstIterator<float> pt_iter(polygon_mesh.cloud, "x");
+        
+        // for(size_t i = 0; i < size ; i++, ++pt_iter){
+        //   pt_iter[0] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i];
+        //   pt_iter[1] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i + 1];
+        //   pt_iter[2] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i + 2];
+        // }
+        std::cout<<static_cast<const shapes::Mesh*>(it->second)->triangle_count<<", "<<static_cast<const shapes::Mesh*>(it->second)->vertex_count<<std::endl;
+        size_t size = static_cast<const shapes::Mesh*>(it->second)->triangle_count;
+        ROS_ERROR("Into updateShapeMask shapes::MESH 1");
+        polygon_mesh.polygons.resize(size);
+        std::cout<<"polygon_mesh.polygons.size = "<<polygon_mesh.polygons.size()<<std::endl;
+        size = static_cast<const shapes::Mesh*>(it->second)->vertex_count;
+        polygon_mesh.cloud.data.resize(size);
+        polygon_mesh.cloud.height = 1;
+        polygon_mesh.cloud.width = size;
+        std::cout<<"polygon_mesh.cloud.data.size() = "<<polygon_mesh.cloud.data.size()<<std::endl;
+        for(size_t i = 0; i < polygon_mesh.cloud.data.size(); i++)
+        {
+          // for (int j = 0; j < 3; j++)
+          // {
+          // std::cout<<i<<", "<<j<<std::endl;
+          polygon_mesh.cloud.data[i] = static_cast<const shapes::Mesh*>(it->second)->vertices[i];
+          // }
+        }
+        for (size_t i = 0; i < polygon_mesh.polygons.size(); i++)
+        {
+          for (int j = 0; j < 3; j++)
+          {
+            // polygon_mesh.polygons[i].vertices.push_back(static_cast<const shapes::Mesh*>(it->second)->vertices
+            //                                            [static_cast<const shapes::Mesh*>(it->second)->triangles[3*i + j]]);
+            polygon_mesh.polygons[i].vertices.push_back(static_cast<const shapes::Mesh*>(it->second)->triangles[3*i + j]);
+            std::cout<<static_cast<const shapes::Mesh*>(it->second)->triangles[3*i + j]<<std::endl;
+          }
+        }
+        ROS_ERROR("Into updateShapeMask shapes::MESH 3");
+        vtkSmartPointer<vtkPolyData> vtk_poly_data = vtkSmartPointer<vtkPolyData>::New ();
+        pcl::io::mesh2vtk (polygon_mesh, vtk_poly_data);
+        ROS_ERROR("Into updateShapeMask shapes::MESH 4");
+        pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr model_cloud (new pcl::PointCloud<pcl::PointXYZRGBNormal>);
+        uniform_sampling(vtk_poly_data, 1000, false, false, *model_cloud);
+        ROS_ERROR("Into updateShapeMask shapes::MESH end");
+        std::cout<<"cloud_out->width = "<<model_cloud->width<<std::endl;
+        std::vector<Vector3f> model_coordinates;
+        for(auto it=model_cloud->begin(); it!=model_cloud->end(); ++it)
+        {
+          model_coordinates.push_back(Vector3f(it->x, it->y, it->z));
+        }
+        cloud_vector.push_back(model_coordinates);
+      }
+      else
+      {
+        ROS_DEBUG("Into updateShapeMask shapes::UNKNOWN");
+        contain_shape_.erase(it);
+        ROS_DEBUG("Creating body from shape: Unknown shape type");
+      }
+    }
+    mpc = new MetaPointCloud(cloud_vector);
+  }
   return h;
 }
 
@@ -202,109 +314,117 @@ void PointCloudOctomapUpdaterFast::updateShapeMask()
   maskVoxelList->clearMap();
   //the upper one is always the on generated by coordinates
   //box, by coordinates
-  std::vector<std::vector<Vector3f>> cloud_vector;
-  float side_length;
-  gvl->getVoxelSideLength(side_length);
-  float delta = side_length / 1.0f;
-  for(auto it = contain_shape_.begin(); it != contain_shape_.end(); ++it)
-  {
-    if(it->second->type == shapes::BOX)
-    { 
-      ROS_DEBUG("Into updateShapeMask shapes::BOX");
-      const double *size = static_cast<const shapes::Box*>(it->second)->size;
-      Vector3f center_min = Vector3f(-1*size[0]/2, -1*size[1]/2, -1*size[2]/2);
-      Vector3f center_max = Vector3f(size[0]/2, size[1]/2, size[2]/2);
-      std::vector<Vector3f> box_coordinates = geometry_generation::createBoxOfPoints(center_min, center_max, delta);
-      cloud_vector.push_back(box_coordinates);
-      // maskVoxelList->insertCoordinateList(box_coordinates, eBVM_OCCUPIED);
-      ROS_DEBUG("Into updateShapeMask shapes::BOX end");
-    }
-    else if(it->second->type == shapes::SPHERE)
-    {
-      ROS_DEBUG("Into updateShapeMask shapes::SPHERE");
-      double sphere_radius = static_cast<const shapes::Sphere*>(it->second)->radius;
-      Vector3f sphere_center = Vector3f(0, 0, 0);
-      std::vector<Vector3f> sphere_coordinates = geometry_generation::createSphereOfPoints(sphere_center, sphere_radius, delta);
-      cloud_vector.push_back(sphere_coordinates);
-      // maskVoxelList->insertCoordinateList(sphere_coordinates, eBVM_OCCUPIED);
-      ROS_DEBUG("Into updateShapeMask shapes::SPHERE end");
-    }
-    else if(it->second->type == shapes::CYLINDER)
-    {
-      ROS_DEBUG("Into updateShapeMask shapes::CYLINDER");
-      double cylinder_radius = static_cast<const shapes::Cylinder*>(it->second)->radius;
-      double cylinder_length = static_cast<const shapes::Cylinder*>(it->second)->length;
-      Vector3f cylinder_center = Vector3f(0, 0, 0);
-      std::vector<Vector3f> cylinder_coordinates = geometry_generation::createCylinderOfPoints(cylinder_center, cylinder_radius, cylinder_length, delta);
-      cloud_vector.push_back(cylinder_coordinates);
-      // maskVoxelList->insertCoordinateList(cylinder_coordinates, eBVM_OCCUPIED);
-      ROS_DEBUG("Into updateShapeMask shapes::CYLINDER end");
-    }
-    else if(it->second->type == shapes::MESH)
-    {
-      ROS_ERROR("Into updateShapeMask shapes::MESH");
-      pcl::PolygonMesh polygon_mesh;
+  // std::vector<std::vector<Vector3f>> cloud_vector;
+  // float side_length;
+  // gvl->getVoxelSideLength(side_length);
+  // float delta = side_length / 1.0f;
+  // for(auto it = contain_shape_.begin(); it != contain_shape_.end(); ++it)
+  // {
+  //   if(it->second->type == shapes::BOX)
+  //   { 
+  //     ROS_DEBUG("Into updateShapeMask shapes::BOX");
+  //     const double *size = static_cast<const shapes::Box*>(it->second)->size;
+  //     Vector3f center_min = Vector3f(-1*size[0]/2, -1*size[1]/2, -1*size[2]/2);
+  //     Vector3f center_max = Vector3f(size[0]/2, size[1]/2, size[2]/2);
+  //     std::vector<Vector3f> box_coordinates = geometry_generation::createBoxOfPoints(center_min, center_max, delta);
+  //     cloud_vector.push_back(box_coordinates);
+  //     // maskVoxelList->insertCoordinateList(box_coordinates, eBVM_OCCUPIED);
+  //     ROS_DEBUG("Into updateShapeMask shapes::BOX end");
+  //   }
+  //   else if(it->second->type == shapes::SPHERE)
+  //   {
+  //     ROS_DEBUG("Into updateShapeMask shapes::SPHERE");
+  //     double sphere_radius = static_cast<const shapes::Sphere*>(it->second)->radius;
+  //     Vector3f sphere_center = Vector3f(0, 0, 0);
+  //     std::vector<Vector3f> sphere_coordinates = geometry_generation::createSphereOfPoints(sphere_center, sphere_radius, delta);
+  //     cloud_vector.push_back(sphere_coordinates);
+  //     // maskVoxelList->insertCoordinateList(sphere_coordinates, eBVM_OCCUPIED);
+  //     ROS_DEBUG("Into updateShapeMask shapes::SPHERE end");
+  //   }
+  //   else if(it->second->type == shapes::CYLINDER)
+  //   {
+  //     ROS_DEBUG("Into updateShapeMask shapes::CYLINDER");
+  //     double cylinder_radius = static_cast<const shapes::Cylinder*>(it->second)->radius;
+  //     double cylinder_length = static_cast<const shapes::Cylinder*>(it->second)->length;
+  //     Vector3f cylinder_center = Vector3f(0, 0, 0);
+  //     std::vector<Vector3f> cylinder_coordinates = geometry_generation::createCylinderOfPoints(cylinder_center, cylinder_radius, cylinder_length, delta);
+  //     cloud_vector.push_back(cylinder_coordinates);
+  //     // maskVoxelList->insertCoordinateList(cylinder_coordinates, eBVM_OCCUPIED);
+  //     ROS_DEBUG("Into updateShapeMask shapes::CYLINDER end");
+  //   }
+  //   else if(it->second->type == shapes::MESH)
+  //   {
+  //     ROS_ERROR("Into updateShapeMask shapes::MESH");
+  //     pcl::PolygonMesh polygon_mesh;
 
-      // sensor_msgs::PointCloud2Modifier pcd_modifier(polygon_mesh.cloud);
+  //     // sensor_msgs::PointCloud2Modifier pcd_modifier(polygon_mesh.cloud);
 
-      // size_t size = sizeof(static_cast<const shapes::Mesh*>(it->second)->vertices) / sizeof(double) / 3;
+  //     // size_t size = sizeof(static_cast<const shapes::Mesh*>(it->second)->vertices) / sizeof(double) / 3;
       
-      // pcd_modifier.resize(size);
+  //     // pcd_modifier.resize(size);
 
-      // std::cout << "polys: " << sizeof(static_cast<const shapes::Mesh*>(it->second)->triangles)/sizeof(unsigned int) << " vertices: " << pcd_modifier.size() << "\n";
+  //     // std::cout << "polys: " << sizeof(static_cast<const shapes::Mesh*>(it->second)->triangles)/sizeof(unsigned int) << " vertices: " << pcd_modifier.size() << "\n";
 
-      // sensor_msgs::PointCloud2ConstIterator<float> pt_iter(polygon_mesh.cloud, "x");
+  //     // sensor_msgs::PointCloud2ConstIterator<float> pt_iter(polygon_mesh.cloud, "x");
       
-      // for(size_t i = 0; i < size ; i++, ++pt_iter){
-      //   pt_iter[0] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i];
-      //   pt_iter[1] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i + 1];
-      //   pt_iter[2] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i + 2];
-      // }
-      std::cout<<static_cast<const shapes::Mesh*>(it->second)->triangle_count<<", "<<static_cast<const shapes::Mesh*>(it->second)->vertex_count<<std::endl;
-      size_t size = static_cast<const shapes::Mesh*>(it->second)->triangle_count;
-      ROS_ERROR("Into updateShapeMask shapes::MESH 1");
-      polygon_mesh.polygons.resize(size);
-      std::cout<<"polygon_mesh.polygons.size = "<<polygon_mesh.polygons.size()<<std::endl;
-      size = static_cast<const shapes::Mesh*>(it->second)->vertex_count;
-      polygon_mesh.cloud.data.resize(size);
-      polygon_mesh.cloud.height = 1;
-      polygon_mesh.cloud.width = size;
-      std::cout<<"polygon_mesh.cloud.data.size() = "<<polygon_mesh.cloud.data.size()<<std::endl;
-      for(size_t i = 0; i < polygon_mesh.cloud.data.size(); i++)
-      {
-        // for (int j = 0; j < 3; j++)
-        // {
-        // std::cout<<i<<", "<<j<<std::endl;
-        polygon_mesh.cloud.data[i] = static_cast<const shapes::Mesh*>(it->second)->vertices[i];
-        // }
-      }
-      for (size_t i = 0; i < polygon_mesh.polygons.size(); i++)
-      {
-        for (int j = 0; j < 3; j++)
-        {
-          polygon_mesh.polygons[i].vertices.push_back(static_cast<const shapes::Mesh*>(it->second)->vertices
-                                                     [static_cast<const shapes::Mesh*>(it->second)->triangles[3*i + j]]);
-          std::cout<<static_cast<const shapes::Mesh*>(it->second)->triangles[3*i + j]<<std::endl;
-        }
-      }
-      ROS_ERROR("Into updateShapeMask shapes::MESH 3");
-      vtkSmartPointer<vtkPolyData> vtk_poly_data = vtkSmartPointer<vtkPolyData>::New ();
-      pcl::io::mesh2vtk (polygon_mesh, vtk_poly_data);
-      ROS_ERROR("Into updateShapeMask shapes::MESH 4");
-      pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr cloud_1 (new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-      uniform_sampling (vtk_poly_data, 1000, false, false, *cloud_1);
-      ROS_ERROR("Into updateShapeMask shapes::MESH end");
-      std::cout<<"cloud_out->width = "<<cloud_1->width<<std::endl;
-    }
-    else
-    {
-      ROS_DEBUG("Into updateShapeMask shapes::UNKNOWN");
-      contain_shape_.erase(it);
-      ROS_DEBUG("Creating body from shape: Unknown shape type");
-    }
-  }
-
-  MetaPointCloud mpc(cloud_vector);
+  //     // for(size_t i = 0; i < size ; i++, ++pt_iter){
+  //     //   pt_iter[0] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i];
+  //     //   pt_iter[1] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i + 1];
+  //     //   pt_iter[2] = static_cast<const shapes::Mesh*>(it->second)->vertices[3*i + 2];
+  //     // }
+  //     std::cout<<static_cast<const shapes::Mesh*>(it->second)->triangle_count<<", "<<static_cast<const shapes::Mesh*>(it->second)->vertex_count<<std::endl;
+  //     size_t size = static_cast<const shapes::Mesh*>(it->second)->triangle_count;
+  //     ROS_ERROR("Into updateShapeMask shapes::MESH 1");
+  //     polygon_mesh.polygons.resize(size);
+  //     std::cout<<"polygon_mesh.polygons.size = "<<polygon_mesh.polygons.size()<<std::endl;
+  //     size = static_cast<const shapes::Mesh*>(it->second)->vertex_count;
+  //     polygon_mesh.cloud.data.resize(size);
+  //     polygon_mesh.cloud.height = 1;
+  //     polygon_mesh.cloud.width = size;
+  //     std::cout<<"polygon_mesh.cloud.data.size() = "<<polygon_mesh.cloud.data.size()<<std::endl;
+  //     for(size_t i = 0; i < polygon_mesh.cloud.data.size(); i++)
+  //     {
+  //       // for (int j = 0; j < 3; j++)
+  //       // {
+  //       // std::cout<<i<<", "<<j<<std::endl;
+  //       polygon_mesh.cloud.data[i] = static_cast<const shapes::Mesh*>(it->second)->vertices[i];
+  //       // }
+  //     }
+  //     for (size_t i = 0; i < polygon_mesh.polygons.size(); i++)
+  //     {
+  //       for (int j = 0; j < 3; j++)
+  //       {
+  //         // polygon_mesh.polygons[i].vertices.push_back(static_cast<const shapes::Mesh*>(it->second)->vertices
+  //         //                                            [static_cast<const shapes::Mesh*>(it->second)->triangles[3*i + j]]);
+  //         polygon_mesh.polygons[i].vertices.push_back(static_cast<const shapes::Mesh*>(it->second)->triangles[3*i + j]);
+  //         std::cout<<static_cast<const shapes::Mesh*>(it->second)->triangles[3*i + j]<<std::endl;
+  //       }
+  //     }
+  //     ROS_ERROR("Into updateShapeMask shapes::MESH 3");
+  //     vtkSmartPointer<vtkPolyData> vtk_poly_data = vtkSmartPointer<vtkPolyData>::New ();
+  //     pcl::io::mesh2vtk (polygon_mesh, vtk_poly_data);
+  //     ROS_ERROR("Into updateShapeMask shapes::MESH 4");
+  //     pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr model_cloud (new pcl::PointCloud<pcl::PointXYZRGBNormal>);
+  //     uniform_sampling(vtk_poly_data, 1000, false, false, *model_cloud);
+  //     ROS_ERROR("Into updateShapeMask shapes::MESH end");
+  //     std::cout<<"cloud_out->width = "<<model_cloud->width<<std::endl;
+  //     std::vector<Vector3f> model_coordinates;
+  //     for(auto it=model_cloud->begin(); it!=model_cloud->end(); ++it)
+  //     {
+  //       model_coordinates.push_back(Vector3f(it->x, it->y, it->z));
+  //     }
+  //     cloud_vector.push_back(model_coordinates);
+  //   }
+  //   else
+  //   {
+  //     ROS_DEBUG("Into updateShapeMask shapes::UNKNOWN");
+  //     contain_shape_.erase(it);
+  //     ROS_DEBUG("Creating body from shape: Unknown shape type");
+  //   }
+  // }
+  // mpc = new MetaPointCloud(cloud_vector);
+  // MetaPointCloud mpc(cloud_vector);
+  
   int i = 0;
   for(auto it = contain_shape_.begin(); it != contain_shape_.end(); ++it)
   {
@@ -314,10 +434,10 @@ void PointCloudOctomapUpdaterFast::updateShapeMask()
                             tmp.matrix().coeff(1,0), tmp.matrix().coeff(1,1), tmp.matrix().coeff(1,2), tmp.matrix().coeff(1,3),
                             tmp.matrix().coeff(2,0), tmp.matrix().coeff(2,1), tmp.matrix().coeff(2,2), tmp.matrix().coeff(2,3),
                             tmp.matrix().coeff(3,0), tmp.matrix().coeff(3,1), tmp.matrix().coeff(3,2), tmp.matrix().coeff(3,3));
-    mpc.transformSelfSubCloud(i, &transformation);
+    mpc->transformSelfSubCloud(i, &transformation);
     i++;
   }
-  maskVoxelList->insertMetaPointCloud(mpc, eBVM_SWEPT_VOLUME_START);
+  maskVoxelList->insertMetaPointCloud(*mpc, eBVM_SWEPT_VOLUME_START);
 }
 
 void PointCloudOctomapUpdaterFast::forgetShape(ShapeHandle handle)

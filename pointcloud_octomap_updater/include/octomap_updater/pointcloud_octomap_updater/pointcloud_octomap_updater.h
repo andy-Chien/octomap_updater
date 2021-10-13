@@ -131,6 +131,8 @@ private:
   std::map<ShapeHandle, shapes::Shape*> contain_shape_;
   std::map<ShapeHandle, Eigen::Isometry3d> shapes_transform_;
   std::map<ShapeHandle, Eigen::Isometry3d> tmp_shapes_transform_;
+  std::vector<std::vector<Vector3f>> cloud_vector;
+  MetaPointCloud *mpc;
 };
 }  // namespace occupancy_map_monitor
 
