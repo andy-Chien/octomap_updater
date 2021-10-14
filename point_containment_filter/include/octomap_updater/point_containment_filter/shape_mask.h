@@ -131,5 +131,38 @@ private:
   std::map<ShapeHandle, std::set<SeeShape, SortBodies>::iterator> used_handles_;
 };
 }  // namespace point_containment_filter
+// template<typename PointT> void
+// toPCLPointCloud2 (const pcl::PointCloud<PointT>& cloud, pcl::PCLPointCloud2& msg)
+// {
+//   // Ease the user's burden on specifying width/height for unorganized datasets
+//   if (cloud.width == 0 && cloud.height == 0)
+//   {
+//     msg.width  = cloud.size ();
+//     msg.height = 1;
+//   }
+//   else
+//   {
+//     assert (cloud.size () == cloud.width * cloud.height);
+//     msg.height = cloud.height;
+//     msg.width  = cloud.width;
+//   }
 
+//   // Fill point cloud binary data (padding and all)
+//   std::size_t data_size = sizeof (PointT) * cloud.size ();
+//   msg.data.resize (data_size);
+//   if (data_size)
+//   {
+//     memcpy(&msg.data[0], &cloud[0], data_size);
+//   }
+
+//   // Fill fields metadata
+//   msg.fields.clear ();
+//   for_each_type<typename traits::fieldList<PointT>::type> (detail::FieldAdder<PointT>(msg.fields));
+
+//   msg.header     = cloud.header;
+//   msg.point_step = sizeof (PointT);
+//   msg.row_step   = (sizeof (PointT) * msg.width);
+//   msg.is_dense   = cloud.is_dense;
+//   /// @todo msg.is_bigendian = ?;
+// }
 #endif

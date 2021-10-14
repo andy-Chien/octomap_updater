@@ -84,17 +84,13 @@ randPSurface (vtkPolyData * polydata, std::vector<double> * cumulativeAreas, dou
 
   std::vector<double>::iterator low = std::lower_bound (cumulativeAreas->begin (), cumulativeAreas->end (), r);
   vtkIdType el = vtkIdType (low - cumulativeAreas->begin ());
-  std::cout<<"Into updateShapeMask shapes::MESH 371"<<std::endl;
   double A[3], B[3], C[3];
   vtkIdType npts = 0;
   vtkIdType *ptIds = nullptr;
   polydata->GetCellPoints (el, npts, ptIds);
-  std::cout<<"Into updateShapeMask shapes::MESH 372"<<std::endl;
   polydata->GetPoint (ptIds[0], A);
-  std::cout<<"Into updateShapeMask shapes::MESH 373"<<std::endl;
   polydata->GetPoint (ptIds[1], B);
   polydata->GetPoint (ptIds[2], C);
-  std::cout<<"Into updateShapeMask shapes::MESH 374"<<std::endl;
   if (calcNormal)
   {
     // OBJ: Vertices are stored in a counter-clockwise order by default
@@ -135,26 +131,20 @@ randPSurface (vtkPolyData * polydata, std::vector<double> * cumulativeAreas, dou
 void
 uniform_sampling (vtkSmartPointer<vtkPolyData> polydata, std::size_t n_samples, bool calc_normal, bool calc_color, pcl::PointCloud<pcl::PointXYZRGBNormal> & cloud_out)
 {
-  std::cout<<"Into updateShapeMask shapes::MESH 31"<<std::endl;
   polydata->BuildCells ();
-  std::cout<<"Into updateShapeMask shapes::MESH 32"<<std::endl;
   vtkSmartPointer<vtkCellArray> cells = polydata->GetPolys ();
-  std::cout<<"Into updateShapeMask shapes::MESH 33"<<std::endl;
   double p1[3], p2[3], p3[3], totalArea = 0;
   std::vector<double> cumulativeAreas (cells->GetNumberOfCells (), 0);
-  std::cout<<"Into updateShapeMask shapes::MESH 34"<<"cells->GetNumberOfCells () = "<<cells->GetNumberOfCells ()<<std::endl;
+  std::cout<<"cells->GetNumberOfCells () = "<<cells->GetNumberOfCells ()<<std::endl;
   vtkIdType npts = 0, *ptIds = nullptr;
   std::size_t cellId = 0;
   for (cells->InitTraversal (); cells->GetNextCell (npts, ptIds); cellId++)
   {
-    std::cout<<"Into updateShapeMask shapes::MESH 35"<<std::endl;
     polydata->GetPoint (ptIds[0], p1);
     polydata->GetPoint (ptIds[1], p2);
     polydata->GetPoint (ptIds[2], p3);
-    std::cout<<"Into updateShapeMask shapes::MESH 36"<<std::endl;
     totalArea += vtkTriangle::TriangleArea (p1, p2, p3);
     cumulativeAreas[cellId] = totalArea;
-    std::cout<<"Into updateShapeMask shapes::MESH 37"<<std::endl;
   }
 
   cloud_out.points.resize (n_samples);
@@ -166,11 +156,9 @@ uniform_sampling (vtkSmartPointer<vtkPolyData> polydata, std::size_t n_samples, 
     Eigen::Vector3f n (0, 0, 0);
     Eigen::Vector3f c (0, 0, 0);
     randPSurface (polydata, &cumulativeAreas, totalArea, p, calc_normal, n, calc_color, c);
-    std::cout<<"Into updateShapeMask shapes::MESH 38"<<std::endl;
     cloud_out[i].x = p[0];
     cloud_out[i].y = p[1];
     cloud_out[i].z = p[2];
-    std::cout<<"Into updateShapeMask shapes::MESH 39"<<std::endl;
     if (calc_normal)
     {
       cloud_out[i].normal_x = n[0];

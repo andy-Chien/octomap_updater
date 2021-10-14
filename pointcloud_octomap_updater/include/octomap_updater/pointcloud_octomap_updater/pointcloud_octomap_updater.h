@@ -129,6 +129,7 @@ private:
   shared_ptr<BitVectorVoxelList> maskVoxelList;
   ShapeHandle next_handle_;
   std::map<ShapeHandle, shapes::Shape*> contain_shape_;
+  std::map<ShapeHandle, int> cloud_indx_;
   std::map<ShapeHandle, Eigen::Isometry3d> shapes_transform_;
   std::map<ShapeHandle, Eigen::Isometry3d> tmp_shapes_transform_;
   std::vector<std::vector<Vector3f>> cloud_vector;
