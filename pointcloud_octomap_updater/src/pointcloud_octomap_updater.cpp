@@ -97,8 +97,7 @@ bool PointCloudOctomapUpdaterFast::setParams(XmlRpc::XmlRpcValue& params)
 
 bool PointCloudOctomapUpdaterFast::initialize()
 {
-  next_handle_ = 0;
-  mpc = new MetaPointCloud();
+  next_handle_ = 1;
   tf_buffer_.reset(new tf2_ros::Buffer());
   tf_listener_.reset(new tf2_ros::TransformListener(*tf_buffer_, root_nh_));
   shape_mask_.reset(new point_containment_filter::ShapeMask());
@@ -111,9 +110,17 @@ bool PointCloudOctomapUpdaterFast::initialize()
 
 void PointCloudOctomapUpdaterFast::gvlInitialize()
 {
+  mpc = new MetaPointCloud();
+  std::vector<Vector3f> empty_cloud;
+  addCloudToMPC(empty_cloud);
   Vector3ui map_dim(256, 256, 256);
   map_dimensions =  map_dim;
   voxel_side_length = 0.01f; // 1 cm voxel size
+  init_transform = Matrix4f(1, 0, 0, (float)map_dimensions.x * voxel_side_length / 2,
+                            0, 1, 0, (float)map_dimensions.y * voxel_side_length / 2,
+                            0, 0, 1, (float)map_dimensions.z * voxel_side_length / 2,
+                            0, 0, 0, 1);
+  init_transform.invertMatrix(inv_init_transform);
 
   /*
    * First, we generate an API class, which defines the
@@ -189,112 +196,142 @@ void PointCloudOctomapUpdaterFast::stop()
 
 ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstPtr& shape)
 {
-  ShapeHandle h = 0;
-  if (shape_mask_)
+  // h = shape_mask_->addShape(shape, scale_, padding_);
+  ShapeHandle h = next_handle_;
+  next_handle_ += 1;
+  float side_length;
+  gvl->getVoxelSideLength(side_length);
+  float delta = side_length / 1.0f;
+  bool add_shape_success = true;
+  // mpc->syncToHost();
+  if(shape->type == shapes::BOX)
+  { 
+    ROS_DEBUG("Into updateShapeMask shapes::BOX");
+    const double *size = static_cast<const shapes::Box*>(shape.get())->size;
+    Vector3f center_min = Vector3f(-1*size[0]/2, -1*size[1]/2, -1*size[2]/2);
+    Vector3f center_max = Vector3f(size[0]/2, size[1]/2, size[2]/2);
+    // std::vector<Vector3f> box_coordinates = gpu_voxels::geometry_generation::createBoxOfPoints(center_min, center_max, delta);
+    // cloud_vector.push_back(box_coordinates);
+    h = addCloudToMPC(gpu_voxels::geometry_generation::createBoxOfPoints(center_min, center_max, delta));
+    // mpc->syncToHost();
+    // mpc->addCloud(box_coordinates);
+    // mpc->syncToDevice();
+    // uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
+    // mpc->transformSelfSubCloud(cloud_id, &init_transform);
+    // mpc->syncToHost();
+    ROS_DEBUG("Into updateShapeMask shapes::BOX end");
+  }
+  else if(shape->type == shapes::SPHERE)
   {
-    // h = shape_mask_->addShape(shape, scale_, padding_);
-    h = next_handle_;
-    next_handle_ += 1;
+    ROS_DEBUG("Into updateShapeMask shapes::SPHERE");
+    double sphere_radius = static_cast<const shapes::Sphere*>(shape.get())->radius;
+    Vector3f sphere_center = Vector3f(0, 0, 0);
+    // std::vector<Vector3f> sphere_coordinates = gpu_voxels::geometry_generation::createSphereOfPoints(sphere_center, sphere_radius, delta);
+    // cloud_vector.push_back(sphere_coordinates);
+    h = addCloudToMPC(gpu_voxels::geometry_generation::createSphereOfPoints(sphere_center, sphere_radius, delta));
+    // mpc->syncToHost();
+    // mpc->addCloud(sphere_coordinates);
+    // mpc->syncToDevice();
+    // uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
+    // mpc->transformSelfSubCloud(cloud_id, &init_transform);
+    // mpc->syncToHost();
+    ROS_DEBUG("Into updateShapeMask shapes::SPHERE end");
+  }
+  else if(shape->type == shapes::CYLINDER)
+  {
+    ROS_DEBUG("Into updateShapeMask shapes::CYLINDER");
+    double cylinder_radius = static_cast<const shapes::Cylinder*>(shape.get())->radius;
+    double cylinder_length = static_cast<const shapes::Cylinder*>(shape.get())->length;
+    Vector3f cylinder_center = Vector3f(0, 0, 0);
+    // std::vector<Vector3f> cylinder_coordinates = gpu_voxels::geometry_generation::createCylinderOfPoints(cylinder_center, cylinder_radius, cylinder_length, delta);
+    // cloud_vector.push_back(cylinder_coordinates);
+    h = addCloudToMPC(gpu_voxels::geometry_generation::createCylinderOfPoints(cylinder_center, cylinder_radius, cylinder_length, delta));
+    // mpc->syncToHost();
+    // mpc->addCloud(cylinder_coordinates);
+    // mpc->syncToDevice();
+    // uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
+    // mpc->transformSelfSubCloud(cloud_id, &init_transform);
+    // mpc->syncToHost();
+    ROS_DEBUG("Into updateShapeMask shapes::CYLINDER end");
+  }
+  else if(shape->type == shapes::MESH)
+  {
+    ROS_ERROR("Into updateShapeMask shapes::MESH");
+    pcl::PolygonMesh polygon_mesh;
+    std::cout<<static_cast<const shapes::Mesh*>(shape.get())->triangle_count<<", "<<static_cast<const shapes::Mesh*>(shape.get())->vertex_count<<std::endl;
+    size_t size = static_cast<const shapes::Mesh*>(shape.get())->triangle_count;
+    polygon_mesh.polygons.resize(size);
+    std::cout<<"polygon_mesh.polygons.size = "<<polygon_mesh.polygons.size()<<std::endl;
+    pcl::PointCloud<pcl::PointXYZ> vertex_cloud;
+
+    for(size_t i = 0; i < static_cast<const shapes::Mesh*>(shape.get())->vertex_count; i++)
+    {
+      pcl::PointXYZ p;
+      p.x = static_cast<const shapes::Mesh*>(shape.get())->vertices[3 * i];
+      p.y = static_cast<const shapes::Mesh*>(shape.get())->vertices[3 * i + 1];
+      p.z = static_cast<const shapes::Mesh*>(shape.get())->vertices[3 * i + 2];
+      vertex_cloud.push_back(p);
+    }
+    pcl::toPCLPointCloud2(vertex_cloud, polygon_mesh.cloud);
+
+    for (size_t i = 0; i < polygon_mesh.polygons.size(); i++)
+      for (int j = 0; j < 3; j++)
+        polygon_mesh.polygons[i].vertices.push_back(static_cast<const shapes::Mesh*>(shape.get())->triangles[3*i + j]);
+
+    vtkSmartPointer<vtkPolyData> vtk_poly_data = vtkSmartPointer<vtkPolyData>::New ();
+    pcl::io::mesh2vtk (polygon_mesh, vtk_poly_data);
+    pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr model_cloud (new pcl::PointCloud<pcl::PointXYZRGBNormal>);
+    uniform_sampling(vtk_poly_data, 2000, false, false, *model_cloud);
+    ROS_ERROR("Into updateShapeMask shapes::MESH end");
+    std::cout<<"cloud_out->width = "<<model_cloud->width<<std::endl;
+
+    std::vector<Vector3f> model_coordinates;
+    for(auto cloud_it=model_cloud->begin(); cloud_it!=model_cloud->end(); ++cloud_it)
+      model_coordinates.push_back(Vector3f(cloud_it->x, cloud_it->y, cloud_it->z));
+    // cloud_vector.push_back(model_coordinates);
+    h = addCloudToMPC(model_coordinates);
+    // mpc->syncToHost();
+    // mpc->addCloud(model_coordinates);
+    // mpc->syncToDevice();
+    // uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
+    // mpc->transformSelfSubCloud(cloud_id, &init_transform);
+    // mpc->syncToHost();
+  }
+  else
+  {
+    ROS_DEBUG("Into updateShapeMask shapes::UNKNOWN");
+    ROS_DEBUG("Creating body from shape: Unknown shape type");
+    // std::vector<Vector3f> empty_cloud;
+    // // cloud_vector.push_back(empty_cloud);
+    h = 0;
+    // addCloudToMPC(empty_cloud);
+    add_shape_success = false;
+    // mpc->syncToHost();
+    // mpc->addCloud(empty_cloud);
+    // mpc->syncToHost();
+  }
+
+  if(add_shape_success)
+  {
     contain_shape_.insert(std::pair<ShapeHandle, shapes::Shape*>(h, shape->clone()));
     shapes_transform_.insert(std::pair<ShapeHandle, Eigen::Isometry3d>(h, Eigen::Isometry3d(Eigen::Isometry3d::Identity())));
     tmp_shapes_transform_.insert(std::pair<ShapeHandle, Eigen::Isometry3d>(h, Eigen::Isometry3d(Eigen::Isometry3d::Identity())));
-    Matrix4f init_transform(1, 0, 0, (float)map_dimensions.x * voxel_side_length / 2,
-                            0, 1, 0, (float)map_dimensions.y * voxel_side_length / 2,
-                            0, 0, 1, (float)map_dimensions.z * voxel_side_length / 2,
-                            0, 0, 0, 1);
-
-    float side_length;
-    gvl->getVoxelSideLength(side_length);
-    float delta = side_length / 1.0f;
-    if(shape->type == shapes::BOX)
-    { 
-      ROS_DEBUG("Into updateShapeMask shapes::BOX");
-      const double *size = static_cast<const shapes::Box*>(shape.get())->size;
-      Vector3f center_min = Vector3f(-1*size[0]/2, -1*size[1]/2, -1*size[2]/2);
-      Vector3f center_max = Vector3f(size[0]/2, size[1]/2, size[2]/2);
-      std::vector<Vector3f> box_coordinates = geometry_generation::createBoxOfPoints(center_min, center_max, delta);
-      // cloud_vector.push_back(box_coordinates);
-      mpc->addCloud(box_coordinates);
-      uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
-      // mpc->transformSelfSubCloud(cloud_id, &init_transform);
-      ROS_DEBUG("Into updateShapeMask shapes::BOX end");
-    }
-    else if(shape->type == shapes::SPHERE)
-    {
-      ROS_DEBUG("Into updateShapeMask shapes::SPHERE");
-      double sphere_radius = static_cast<const shapes::Sphere*>(shape.get())->radius;
-      Vector3f sphere_center = Vector3f(0, 0, 0);
-      std::vector<Vector3f> sphere_coordinates = geometry_generation::createSphereOfPoints(sphere_center, sphere_radius, delta);
-      // cloud_vector.push_back(sphere_coordinates);
-      mpc->addCloud(sphere_coordinates);
-      uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
-      // mpc->transformSelfSubCloud(cloud_id, &init_transform);
-      ROS_DEBUG("Into updateShapeMask shapes::SPHERE end");
-    }
-    else if(shape->type == shapes::CYLINDER)
-    {
-      ROS_DEBUG("Into updateShapeMask shapes::CYLINDER");
-      double cylinder_radius = static_cast<const shapes::Cylinder*>(shape.get())->radius;
-      double cylinder_length = static_cast<const shapes::Cylinder*>(shape.get())->length;
-      Vector3f cylinder_center = Vector3f(0, 0, 0);
-      std::vector<Vector3f> cylinder_coordinates = geometry_generation::createCylinderOfPoints(cylinder_center, cylinder_radius, cylinder_length, delta);
-      // cloud_vector.push_back(cylinder_coordinates);
-      mpc->addCloud(cylinder_coordinates);
-      uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
-      // mpc->transformSelfSubCloud(cloud_id, &init_transform);
-      ROS_DEBUG("Into updateShapeMask shapes::CYLINDER end");
-    }
-    else if(shape->type == shapes::MESH)
-    {
-      ROS_ERROR("Into updateShapeMask shapes::MESH");
-      pcl::PolygonMesh polygon_mesh;
-      std::cout<<static_cast<const shapes::Mesh*>(shape.get())->triangle_count<<", "<<static_cast<const shapes::Mesh*>(shape.get())->vertex_count<<std::endl;
-      size_t size = static_cast<const shapes::Mesh*>(shape.get())->triangle_count;
-      polygon_mesh.polygons.resize(size);
-      std::cout<<"polygon_mesh.polygons.size = "<<polygon_mesh.polygons.size()<<std::endl;
-      pcl::PointCloud<pcl::PointXYZ> vertex_cloud;
-
-      for(size_t i = 0; i < static_cast<const shapes::Mesh*>(shape.get())->vertex_count; i++)
-      {
-        pcl::PointXYZ p;
-        p.x = static_cast<const shapes::Mesh*>(shape.get())->vertices[3 * i];
-        p.y = static_cast<const shapes::Mesh*>(shape.get())->vertices[3 * i + 1];
-        p.z = static_cast<const shapes::Mesh*>(shape.get())->vertices[3 * i + 2];
-        vertex_cloud.push_back(p);
-      }
-      pcl::toPCLPointCloud2(vertex_cloud, polygon_mesh.cloud);
-
-      for (size_t i = 0; i < polygon_mesh.polygons.size(); i++)
-        for (int j = 0; j < 3; j++)
-          polygon_mesh.polygons[i].vertices.push_back(static_cast<const shapes::Mesh*>(shape.get())->triangles[3*i + j]);
-
-      vtkSmartPointer<vtkPolyData> vtk_poly_data = vtkSmartPointer<vtkPolyData>::New ();
-      pcl::io::mesh2vtk (polygon_mesh, vtk_poly_data);
-      pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr model_cloud (new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-      uniform_sampling(vtk_poly_data, 2000, false, false, *model_cloud);
-      ROS_ERROR("Into updateShapeMask shapes::MESH end");
-      std::cout<<"cloud_out->width = "<<model_cloud->width<<std::endl;
-
-      std::vector<Vector3f> model_coordinates;
-      for(auto cloud_it=model_cloud->begin(); cloud_it!=model_cloud->end(); ++cloud_it)
-        model_coordinates.push_back(Vector3f(cloud_it->x, cloud_it->y, cloud_it->z));
-      // cloud_vector.push_back(model_coordinates);
-      mpc->addCloud(model_coordinates);
-      uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
-      // mpc->transformSelfSubCloud(cloud_id, &init_transform);
-    }
-    else
-    {
-      ROS_DEBUG("Into updateShapeMask shapes::UNKNOWN");
-      ROS_DEBUG("Creating body from shape: Unknown shape type");
-      std::vector<Vector3f> empty_cloud;
-      // cloud_vector.push_back(empty_cloud);
-      mpc->addCloud(empty_cloud);
-    }
-    // delete mpc;
-    // mpc = new MetaPointCloud(cloud_vector);
   }
+  // delete mpc;
+  // mpc = new MetaPointCloud(cloud_vector);
+  // mpc->syncToHost();
   return h;
+}
+
+uint16_t PointCloudOctomapUpdaterFast::addCloudToMPC(const std::vector<Vector3f> &cloud)
+{
+  // mpc->syncToHost();
+  mpc->addCloud(cloud);
+  mpc->syncToDevice();
+  uint16_t cloud_id = mpc->getNumberOfPointclouds() - 1;
+  mpc->transformSelfSubCloud(cloud_id, &init_transform);
+  mpc->syncToHost();
+  return cloud_id;
 }
 
 void PointCloudOctomapUpdaterFast::updateShapeMask()
@@ -384,21 +421,67 @@ void PointCloudOctomapUpdaterFast::updateShapeMask()
   //   }
   // }
   // mpc = new MetaPointCloud(cloud_vector);
-  
-  // for(auto it = contain_shape_.begin(); it != contain_shape_.end(); ++it)
+
+  // Matrix4f init_transform(1, 0, 0, (float)map_dimensions.x * voxel_side_length / 2,
+  //                         0, 1, 0, (float)map_dimensions.y * voxel_side_length / 2,
+  //                         0, 0, 1, (float)map_dimensions.z * voxel_side_length / 2,
+  //                         0, 0, 0, 1);
+
+  // std::cout<<init_transform<<std::endl;
+  for(auto it = contain_shape_.begin(); it != contain_shape_.end(); ++it)
+  {
+    Eigen::Isometry3d tmp, now;
+    if(!getShapeTransform(it->first, now))
+      ROS_ERROR("getShapeTransform Failed");
+    tmp = tmp_shapes_transform_[it->first].inverse(); // * now;
+    Matrix4f transformation(tmp.matrix().coeff(0,0), tmp.matrix().coeff(0,1), tmp.matrix().coeff(0,2), tmp.matrix().coeff(0,3),
+                            tmp.matrix().coeff(1,0), tmp.matrix().coeff(1,1), tmp.matrix().coeff(1,2), tmp.matrix().coeff(1,3),
+                            tmp.matrix().coeff(2,0), tmp.matrix().coeff(2,1), tmp.matrix().coeff(2,2), tmp.matrix().coeff(2,3),
+                            tmp.matrix().coeff(3,0), tmp.matrix().coeff(3,1), tmp.matrix().coeff(3,2), tmp.matrix().coeff(3,3));
+    Matrix4f transformation_1 = inv_init_transform * transformation * init_transform;
+    Matrix4f transformation_2(now.matrix().coeff(0,0), now.matrix().coeff(0,1), now.matrix().coeff(0,2), now.matrix().coeff(0,3),
+                              now.matrix().coeff(1,0), now.matrix().coeff(1,1), now.matrix().coeff(1,2), now.matrix().coeff(1,3),
+                              now.matrix().coeff(2,0), now.matrix().coeff(2,1), now.matrix().coeff(2,2), now.matrix().coeff(2,3),
+                              now.matrix().coeff(3,0), now.matrix().coeff(3,1), now.matrix().coeff(3,2), now.matrix().coeff(3,3));
+
+    Matrix4f final_trans = init_transform * transformation_2 * transformation * inv_init_transform;
+    Matrix4f second_trans = final_trans * transformation_2;
+    Matrix4f third_trans = second_trans * init_transform;
+    
+    if(fabs(now.matrix().coeff(0,3)) > 0.0001 || fabs(now.matrix().coeff(1,3)) > 0.0001 || fabs(now.matrix().coeff(2,3)) > 0.0001)
+    {
+      int j = 0;
+      std::cout<<mpc->getPointCloud(it->first)[j]<<std::endl;
+      // mpc->transformSelfSubCloud(it->first, &transformation_1);
+      // mpc->transformSelfSubCloud(it->first, &inv_init_transform);
+      // mpc->transformSelfSubCloud(it->first, &transformation);
+      // mpc->transformSelfSubCloud(it->first, &transformation_2);
+      // mpc->transformSelfSubCloud(it->first, &init_transform);
+      mpc->transformSelfSubCloud(it->first, &final_trans);
+      std::cout<<it->first<<" transformation is:"<<std::endl;
+      std::cout<<tmp_shapes_transform_[it->first].matrix()<<std::endl;
+      std::cout<<tmp_shapes_transform_[it->first].inverse().matrix()<<std::endl;
+      std::cout<<now.matrix()<<std::endl;
+      std::cout<<tmp.matrix()<<std::endl;
+      std::cout<<transformation<<std::endl;
+      std::cout<<init_transform<<std::endl;
+      std::cout<<inv_init_transform<<std::endl;
+      std::cout<<transformation_1<<std::endl;
+
+      mpc->syncToHost();
+      std::cout<<mpc->getPointCloud(it->first)[j]<<std::endl;
+      std::cout<<"============================================================="<<std::endl;
+    }
+    tmp_shapes_transform_[it->first] = now;
+  }
+  maskVoxelList->insertMetaPointCloud(*mpc, eBVM_SWEPT_VOLUME_START);
+  // for(int i=0; i<mpc->getNumberOfPointclouds(); i++)
   // {
-  //   Eigen::Isometry3d tmp, now;
-  //   getShapeTransform(it->first, now);
-  //   tmp = tmp_shapes_transform_[it->first].inverse() * now;
-  //   Matrix4f transformation(tmp.matrix().coeff(0,0), tmp.matrix().coeff(0,1), tmp.matrix().coeff(0,2), tmp.matrix().coeff(0,3),
-  //                           tmp.matrix().coeff(1,0), tmp.matrix().coeff(1,1), tmp.matrix().coeff(1,2), tmp.matrix().coeff(1,3),
-  //                           tmp.matrix().coeff(2,0), tmp.matrix().coeff(2,1), tmp.matrix().coeff(2,2), tmp.matrix().coeff(2,3),
-  //                           tmp.matrix().coeff(3,0), tmp.matrix().coeff(3,1), tmp.matrix().coeff(3,2), tmp.matrix().coeff(3,3));
-  //   mpc->transformSelfSubCloud(it->first, &transformation);
-  //   tmp_shapes_transform_[it->first] = now;
+  //   std::cout<<"mpc->getPointcloudSize(i) = "<<mpc->getPointcloudSize(i)<<std::endl;
+  //   int j = 0;
+  //   std::cout<<mpc->getPointCloud(i)[j]<<", ";
   // }
-  // maskVoxelList->insertMetaPointCloud(*mpc, eBVM_SWEPT_VOLUME_START);
-  gvl->getMap("maskVoxelList")->insertMetaPointCloud(*mpc, eBVM_SWEPT_VOLUME_START);
+  // gvl->getMap("maskVoxelList")->insertMetaPointCloud(*mpc, eBVM_SWEPT_VOLUME_START);
   gvl->visualizeMap("maskVoxelList");
 }
 
@@ -410,7 +493,10 @@ void PointCloudOctomapUpdaterFast::forgetShape(ShapeHandle handle)
     ROS_INFO("Forget shape!!");
     contain_shape_.erase(handle);
     std::vector<Vector3f> empty_cloud;
+    mpc->syncToHost();
     mpc->updatePointCloud(handle, empty_cloud);
+    mpc->syncToDevice();
+    mpc->syncToHost();
   }
 }
 
@@ -486,7 +572,9 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   /* mask out points on the robot */
   shape_mask_->maskContainment(*cloud_msg, sensor_origin_eigen, 0.0, max_range_, mask_);
   updateMask(*cloud_msg, sensor_origin_eigen, mask_);
+  mid = ros::WallTime::now();
   updateShapeMask();
+  mid1 = ros::WallTime::now();
   octomap::KeySet free_cells, occupied_cells, model_cells, clip_cells;
   std::unique_ptr<sensor_msgs::PointCloud2> filtered_cloud;
   std::unique_ptr<sensor_msgs::PointCloud2> filtered_cloud_;
@@ -616,7 +704,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     ROS_ERROR("Internal error while updating octree");
   }
   tree_->unlockWrite();
-  ROS_DEBUG("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid5 - mid).toSec() * 1000.0,  (mid3 - mid5).toSec() * 1000.0, (mid4 - mid3).toSec() * 1000.0, (ros::WallTime::now() - mid4).toSec() * 1000.0);
   tree_->triggerUpdateCallback();
 
   if (filtered_cloud)
@@ -625,6 +712,8 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     pcd_modifier.resize(filtered_cloud_size);
     filtered_cloud_publisher_.publish(*filtered_cloud);
   }
+  mid2= ros::WallTime::now();
+  ROS_INFO("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid - start).toSec() * 1000.0,  (mid1 - mid).toSec() * 1000.0, (mid2 - mid1).toSec() * 1000.0, (ros::WallTime::now() - start).toSec() * 1000.0);
 }
 // void PointCloudOctomapUpdaterFast::robotStateCallback(const robot_state::RobotState& state)
 // {

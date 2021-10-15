@@ -83,6 +83,7 @@ protected:
                           std::vector<int>& mask);
   void updateShapeMask();
 private:
+  uint16_t addCloudToMPC(const std::vector<Vector3f> &cloud);
   bool getShapeTransform(ShapeHandle h, Eigen::Isometry3d& transform) const;
   void cloudMsgCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
   void gvlInitialize();
@@ -125,6 +126,9 @@ private:
   PointCloud my_point_cloud;
   robot::JointValueMap myRobotJointValues;
   Matrix4f tf;
+  Matrix4f init_transform;
+  Matrix4f inv_init_transform;
+  // Eigen::Isometry3d init_transform;
   shared_ptr<CountingVoxelList> pointCloudVoxelList;
   shared_ptr<BitVectorVoxelList> maskVoxelList;
   ShapeHandle next_handle_;
