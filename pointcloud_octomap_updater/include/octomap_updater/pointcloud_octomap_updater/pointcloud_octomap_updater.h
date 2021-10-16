@@ -37,6 +37,12 @@
 #ifndef MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 #define MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 
+#define POINTS_PER_MESH 5000
+#define VOXEL_SIDE_LENGTH 0.01f
+#define MAP_DIMENSIONS_X 256
+#define MAP_DIMENSIONS_Y 256
+#define MAP_DIMENSIONS_Z 256
+
 #include <ros/ros.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/message_filter.h>
@@ -52,7 +58,8 @@
 #include <pcl/point_types.h>
 #include <icl_core_config/Config.h>
 #include "octomap_updater/point_containment_filter/shape_mask.h"
-
+#include <queue>
+#include <mutex>
 #include <memory>
 
 using boost::dynamic_pointer_cast;
@@ -128,16 +135,16 @@ private:
   Matrix4f tf;
   Matrix4f init_transform;
   Matrix4f inv_init_transform;
-  // Eigen::Isometry3d init_transform;
   shared_ptr<CountingVoxelList> pointCloudVoxelList;
   shared_ptr<BitVectorVoxelList> maskVoxelList;
-  ShapeHandle next_handle_;
   std::map<ShapeHandle, shapes::Shape*> contain_shape_;
   std::map<ShapeHandle, int> cloud_indx_;
   std::map<ShapeHandle, Eigen::Isometry3d> shapes_transform_;
   std::map<ShapeHandle, Eigen::Isometry3d> tmp_shapes_transform_;
   std::vector<std::vector<Vector3f>> cloud_vector;
+  std::queue<ShapeHandle> empty_handle;
   MetaPointCloud *mpc;
+  std::mutex g_mutex;
 };
 }  // namespace occupancy_map_monitor
 
