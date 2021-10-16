@@ -37,23 +37,25 @@
 #ifndef MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 #define MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 
-#define POINTS_PER_MESH 5000
-#define VOXEL_SIDE_LENGTH 0.01f
-#define MAP_DIMENSIONS_X 256
-#define MAP_DIMENSIONS_Y 256
-#define MAP_DIMENSIONS_Z 256
+#define POINTS_PER_MESH 2000
+#define VOXEL_SIDE_LENGTH 0.015f
+#define MAP_DIMENSIONS_X 120
+#define MAP_DIMENSIONS_Y 120
+#define MAP_DIMENSIONS_Z 120
 
 #include <ros/ros.h>
 #include <tf2_ros/transform_listener.h>
+#include <tf2/LinearMath/Transform.h>
 #include <tf2_ros/message_filter.h>
 #include <message_filters/subscriber.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <moveit/occupancy_map_monitor/occupancy_map_updater.h>
 #include <gpu_voxels/GpuVoxels.h>
+#include <gpu_voxels/helpers/PointCloud.h>
 #include <gpu_voxels/helpers/MetaPointCloud.h>
+#include <gpu_voxels/helpers/GeometryGeneration.h>
 #include <gpu_voxels/robot/urdf_robot/urdf_robot.h>
 #include <gpu_voxels/logging/logging_gpu_voxels.h>
-#include <gpu_voxels/helpers/GeometryGeneration.h>
 #include <pcl_ros/point_cloud.h>
 #include <pcl/point_types.h>
 #include <icl_core_config/Config.h>
@@ -93,6 +95,7 @@ private:
   uint16_t addCloudToMPC(const std::vector<Vector3f> &cloud);
   bool getShapeTransform(ShapeHandle h, Eigen::Isometry3d& transform) const;
   void cloudMsgCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
+  void updatePointCloud(const sensor_msgs::PointCloud2::ConstPtr &cloud_msg, tf2::Stamped<tf2::Transform> &map_h_sensor);
   void gvlInitialize();
   void stopHelper();
 
@@ -143,7 +146,8 @@ private:
   std::map<ShapeHandle, Eigen::Isometry3d> tmp_shapes_transform_;
   std::vector<std::vector<Vector3f>> cloud_vector;
   std::queue<ShapeHandle> empty_handle;
-  MetaPointCloud *mpc;
+  gpu_voxels::MetaPointCloud *shape_mask_mpc;
+  gpu_voxels::PointCloud *received_cloud;
   std::mutex g_mutex;
 };
 }  // namespace occupancy_map_monitor

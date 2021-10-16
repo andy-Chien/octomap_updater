@@ -39,11 +39,9 @@
 #include <moveit/occupancy_map_monitor/occupancy_map_monitor.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2/LinearMath/Vector3.h>
-#include <tf2/LinearMath/Transform.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include <XmlRpcException.h>
 #include <pcl/for_each_type.h>
-#include <gpu_voxels/helpers/MetaPointCloud.h>
 #include "octomap_updater/pointcloud_octomap_updater/pointcloud_octomap_updater.h"
 #include "octomap_updater/pointcloud_octomap_updater/mesh_sampling.hpp"
 
@@ -109,7 +107,8 @@ bool PointCloudOctomapUpdaterFast::initialize()
 
 void PointCloudOctomapUpdaterFast::gvlInitialize()
 {
-  mpc = new MetaPointCloud();
+  shape_mask_mpc = new gpu_voxels::MetaPointCloud();
+  received_cloud = new gpu_voxels::PointCloud();
   std::vector<Vector3f> empty_cloud;
   addCloudToMPC(empty_cloud);
   std::unique_lock<std::mutex> lock(g_mutex);
@@ -265,21 +264,21 @@ uint16_t PointCloudOctomapUpdaterFast::addCloudToMPC(const std::vector<Vector3f>
 {
   std::unique_lock<std::mutex> lock(g_mutex);
   uint16_t cloud_id = 0;
-  mpc->syncToHost();
+  shape_mask_mpc->syncToHost();
   if(empty_handle.empty())
   {
-    mpc->addCloud(cloud);
-    cloud_id = mpc->getNumberOfPointclouds() - 1;
+    shape_mask_mpc->addCloud(cloud);
+    cloud_id = shape_mask_mpc->getNumberOfPointclouds() - 1;
   }
   else
   {
     cloud_id = empty_handle.front();
-    mpc->updatePointCloud(cloud_id, cloud);
+    shape_mask_mpc->updatePointCloud(cloud_id, cloud);
     empty_handle.pop();
   }
-  mpc->syncToDevice();
-  mpc->transformSelfSubCloud(cloud_id, &init_transform);
-  mpc->syncToHost();
+  shape_mask_mpc->syncToDevice();
+  shape_mask_mpc->transformSelfSubCloud(cloud_id, &init_transform);
+  shape_mask_mpc->syncToHost();
   return cloud_id;
 }
 
@@ -290,10 +289,49 @@ void PointCloudOctomapUpdaterFast::forgetShape(ShapeHandle handle)
   shapes_transform_.erase(handle);
   tmp_shapes_transform_.erase(handle);
   std::vector<Vector3f> empty_cloud;
-  mpc->syncToHost();
-  mpc->updatePointCloud(handle, empty_cloud);
-  mpc->syncToDevice();
+  shape_mask_mpc->syncToHost();
+  shape_mask_mpc->updatePointCloud(handle, empty_cloud);
+  shape_mask_mpc->syncToDevice();
   empty_handle.push(handle);
+}
+
+void PointCloudOctomapUpdaterFast::updatePointCloud(const sensor_msgs::PointCloud2::ConstPtr &cloud_msg, tf2::Stamped<tf2::Transform> &map_h_sensor)
+{
+  std::vector<Vector3f> point_data;
+  point_data.reserve(cloud_msg->width * cloud_msg->height);
+  try
+  {
+    for (unsigned int row = 0; row < cloud_msg->height; row += point_subsample_)
+    {
+      unsigned int row_c = row * cloud_msg->width;
+      sensor_msgs::PointCloud2ConstIterator<float> pt_iter(*cloud_msg, "x");
+      // set iterator to point at start of the current row
+      pt_iter += row_c;
+      for (unsigned int col = 0; col < cloud_msg->width; col += point_subsample_, pt_iter += point_subsample_)
+      {
+        /* check for NaN */
+        if (!std::isnan(pt_iter[0]) && !std::isnan(pt_iter[1]) && !std::isnan(pt_iter[2]))
+        {
+          point_data.push_back(Vector3f(pt_iter[0], pt_iter[1], pt_iter[2]));
+        }
+      }
+    }
+  }
+  catch (...)
+  {
+    ROS_ERROR("Point Cloud Update Failed!!!");
+    return;
+  }
+  received_cloud->update(point_data);
+
+  Matrix4f trans(map_h_sensor.getBasis()[0][0], map_h_sensor.getBasis()[0][1], map_h_sensor.getBasis()[0][2], map_h_sensor.getOrigin()[0],
+                 map_h_sensor.getBasis()[1][0], map_h_sensor.getBasis()[1][1], map_h_sensor.getBasis()[1][2], map_h_sensor.getOrigin()[1],
+                 map_h_sensor.getBasis()[2][0], map_h_sensor.getBasis()[2][1], map_h_sensor.getBasis()[2][2], map_h_sensor.getOrigin()[2],
+                 0, 0, 0, 1);
+
+  // transform new pointcloud to world coordinates
+  received_cloud->transformSelf(&trans);
+  pointCloudVoxelList->insertPointCloud(*received_cloud, eBVM_OCCUPIED);
 }
 
 void PointCloudOctomapUpdaterFast::updateShapeMask()
@@ -316,10 +354,10 @@ void PointCloudOctomapUpdaterFast::updateShapeMask()
                             tmp.matrix().coeff(2,0), tmp.matrix().coeff(2,1), tmp.matrix().coeff(2,2), tmp.matrix().coeff(2,3),
                             tmp.matrix().coeff(3,0), tmp.matrix().coeff(3,1), tmp.matrix().coeff(3,2), tmp.matrix().coeff(3,3));
     Matrix4f transformation_1 = init_transform * transformation * inv_init_transform;
-    mpc->transformSelfSubCloud(it->first, &transformation_1);
+    shape_mask_mpc->transformSelfSubCloud(it->first, &transformation_1);
     tmp_shapes_transform_[it->first] = now;
   }
-  maskVoxelList->insertMetaPointCloud(*mpc, eBVM_SWEPT_VOLUME_START);
+  maskVoxelList->insertMetaPointCloud(*shape_mask_mpc, eBVM_SWEPT_VOLUME_START);
 }
 
 bool PointCloudOctomapUpdaterFast::getShapeTransform(ShapeHandle shape_handle, Eigen::Isometry3d& transform) const
@@ -390,7 +428,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
 
   if (!updateTransformCache(cloud_msg->header.frame_id, cloud_msg->header.stamp))
     return;
-
+  updatePointCloud(cloud_msg, map_h_sensor);
   /* mask out points on the robot */
   shape_mask_->maskContainment(*cloud_msg, sensor_origin_eigen, 0.0, max_range_, mask_);
   updateMask(*cloud_msg, sensor_origin_eigen, mask_);
