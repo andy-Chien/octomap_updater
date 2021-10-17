@@ -37,11 +37,8 @@
 #ifndef MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 #define MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 
-#define POINTS_PER_MESH 2000
+#define POINTS_PER_MESH 20000
 #define VOXEL_SIDE_LENGTH 0.015f
-#define MAP_DIMENSIONS_X 120
-#define MAP_DIMENSIONS_Y 120
-#define MAP_DIMENSIONS_Z 120
 
 #include <ros/ros.h>
 #include <tf2_ros/transform_listener.h>
@@ -96,6 +93,7 @@ private:
   bool getShapeTransform(ShapeHandle h, Eigen::Isometry3d& transform) const;
   void cloudMsgCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
   void updatePointCloud(const sensor_msgs::PointCloud2::ConstPtr &cloud_msg, tf2::Stamped<tf2::Transform> &map_h_sensor);
+  void samplePointFromMesh(const shapes::Shape* shape, pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr target_cloud, int sample_num);
   void gvlInitialize();
   void stopHelper();
 
@@ -140,6 +138,7 @@ private:
   Matrix4f inv_init_transform;
   shared_ptr<CountingVoxelList> pointCloudVoxelList;
   shared_ptr<BitVectorVoxelList> maskVoxelList;
+  tf2::Stamped<tf2::Transform> map_h_sensor;
   std::map<ShapeHandle, shapes::Shape*> contain_shape_;
   std::map<ShapeHandle, int> cloud_indx_;
   std::map<ShapeHandle, Eigen::Isometry3d> shapes_transform_;
