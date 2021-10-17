@@ -135,7 +135,6 @@ uniform_sampling (vtkSmartPointer<vtkPolyData> polydata, std::size_t n_samples, 
   vtkSmartPointer<vtkCellArray> cells = polydata->GetPolys ();
   double p1[3], p2[3], p3[3], totalArea = 0;
   std::vector<double> cumulativeAreas (cells->GetNumberOfCells (), 0);
-  std::cout<<"cells->GetNumberOfCells () = "<<cells->GetNumberOfCells ()<<std::endl;
   vtkIdType npts = 0, *ptIds = nullptr;
   std::size_t cellId = 0;
   for (cells->InitTraversal (); cells->GetNextCell (npts, ptIds); cellId++)

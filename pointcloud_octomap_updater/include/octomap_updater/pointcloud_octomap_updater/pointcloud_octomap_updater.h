@@ -37,8 +37,8 @@
 #ifndef MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 #define MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 
-#define POINTS_PER_MESH 20000
-#define VOXEL_SIDE_LENGTH 0.015f
+#define POINTS_PER_MESH 30000
+#define VOXEL_SIDE_LENGTH 0.02f
 
 #include <ros/ros.h>
 #include <tf2_ros/transform_listener.h>
@@ -138,6 +138,8 @@ private:
   Matrix4f inv_init_transform;
   shared_ptr<CountingVoxelList> pointCloudVoxelList;
   shared_ptr<BitVectorVoxelList> maskVoxelList;
+  // shared_ptr<ProbVoxelMap> erodeTempVoxmap;
+  // shared_ptr<ProbVoxelMap> erodeTempVoxmap1;
   tf2::Stamped<tf2::Transform> map_h_sensor;
   std::map<ShapeHandle, shapes::Shape*> contain_shape_;
   std::map<ShapeHandle, int> cloud_indx_;

@@ -143,8 +143,12 @@ void PointCloudOctomapUpdaterFast::gvlInitialize()
   gvl->addMap(MT_BITVECTOR_VOXELLIST, "myHandVoxellist");
   gvl->addMap(MT_BITVECTOR_VOXELLIST, "maskVoxelList");
   gvl->addMap(MT_COUNTING_VOXELLIST, "pointCloudVoxelList");
+  // gvl->addMap(MT_PROBAB_VOXELMAP, "erodeTempVoxmap");
+  // gvl->addMap(MT_PROBAB_VOXELMAP, "erodeTempVoxmap1");
   maskVoxelList = dynamic_pointer_cast<BitVectorVoxelList>(gvl->getMap("maskVoxelList"));
   pointCloudVoxelList = dynamic_pointer_cast<CountingVoxelList>(gvl->getMap("pointCloudVoxelList"));
+  // erodeTempVoxmap = dynamic_pointer_cast<ProbVoxelMap>(gvl->getMap("erodeTempVoxmap"));
+  // erodeTempVoxmap1 = dynamic_pointer_cast<ProbVoxelMap>(gvl->getMap("erodeTempVoxmap1"));
 } 
 
 void PointCloudOctomapUpdaterFast::start()
@@ -215,12 +219,22 @@ ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstP
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr filled_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr mesh_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr down_sample_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-      for(float scale=scale_; scale>0.05; scale-=0.05)
+      // for(float padding=padding_; padding>-0.01; padding-=0.01)
+      // {
+      //   shapes::Shape* shape_for_sample = shape->clone();
+      //   shape_for_sample->scaleAndPadd(scale_, padding);
+      //   samplePointFromMesh(shape_for_sample, mesh_cloud, POINTS_PER_MESH * scale_);
+      //   *filled_cloud += *mesh_cloud;
+      // }
+      for(float padding=padding_; padding>-0.01; padding-=0.01)
       {
-        shapes::Shape* shape_for_sample = shape->clone();
-        shape_for_sample->scaleAndPadd(scale, padding_);
-        samplePointFromMesh(shape_for_sample, mesh_cloud, POINTS_PER_MESH * scale);
-        *filled_cloud += *mesh_cloud;
+        for(float scale=scale_; scale>0.05; scale-=0.05)
+        {
+          shapes::Shape* shape_for_sample = shape->clone();
+          shape_for_sample->scaleAndPadd(scale, padding);
+          samplePointFromMesh(shape_for_sample, mesh_cloud, POINTS_PER_MESH * scale);
+          *filled_cloud += *mesh_cloud;
+        }
       }
       pcl::VoxelGrid<pcl::PointXYZRGBNormal> vg;
       vg.setInputCloud(filled_cloud);
@@ -417,7 +431,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
 
   /* get transform for cloud into map frame */
   
-  mid = ros::WallTime::now();
   if (monitor_->getMapFrame() == cloud_msg->header.frame_id)
     map_h_sensor.setIdentity();
   else
@@ -438,7 +451,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     else
       return;
   }
-  mid1 = ros::WallTime::now();
   /* compute sensor origin in map frame */
   const tf2::Vector3& sensor_origin_tf = map_h_sensor.getOrigin();
   octomap::point3d sensor_origin(sensor_origin_tf.getX(), sensor_origin_tf.getY(), sensor_origin_tf.getZ());
@@ -446,20 +458,19 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
 
   if (!updateTransformCache(cloud_msg->header.frame_id, cloud_msg->header.stamp))
     return;
-  mid2 = ros::WallTime::now();
   updatePointCloud(cloud_msg, map_h_sensor);
   /* mask out points on the robot */
-  shape_mask_->maskContainment(*cloud_msg, sensor_origin_eigen, 0.0, max_range_, mask_);
-  updateMask(*cloud_msg, sensor_origin_eigen, mask_);
+  // shape_mask_->maskContainment(*cloud_msg, sensor_origin_eigen, 0.0, max_range_, mask_);
+  // updateMask(*cloud_msg, sensor_origin_eigen, mask_);
+  mid = ros::WallTime::now();
   updateShapeMask();
   std::vector<Vector3ui> filtered_point;
-  pointCloudVoxelList->copyCoordsToHost(filtered_point);
-  std::cout<<"filtered_point size is "<<filtered_point.size()<<std::endl;
   pointCloudVoxelList->as<voxellist::CountingVoxelList>()->subtractFromCountingVoxelList(
         maskVoxelList->as<voxellist::BitVectorVoxelList>(), Vector3i());
+  // erodeTempVoxmap->merge(pointCloudVoxelList);
+  // erodeTempVoxmap->erodeInto(*erodeTempVoxmap1, voxel_side_length * 2);
   pointCloudVoxelList->copyCoordsToHost(filtered_point);
-  std::cout<<"filtered_point size is "<<filtered_point.size()<<std::endl;
-  mid3 = ros::WallTime::now();
+  mid1 = ros::WallTime::now();
 
   octomap::KeySet free_cells, occupied_cells, model_cells, clip_cells;
   std::unique_ptr<sensor_msgs::PointCloud2> filtered_cloud;
@@ -487,6 +498,9 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   }
   size_t filtered_cloud_size = 0;
 
+  tree_->lockWrite();
+  tree_->clear();
+  tree_->unlockWrite();
 
   tree_->lockRead();
   
@@ -557,9 +571,9 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     }
 
     /* compute the free cells along each ray that ends at an occupied cell */
-    for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
-      if (tree_->computeRayKeys(sensor_origin, tree_->keyToCoord(*it), key_ray_))
-        free_cells.insert(key_ray_.begin(), key_ray_.end());
+    // for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
+    //   if (tree_->computeRayKeys(sensor_origin, tree_->keyToCoord(*it), key_ray_))
+    //     free_cells.insert(key_ray_.begin(), key_ray_.end());
 
     // /* compute the free cells along each ray that ends at a model cell */
     // for (octomap::KeySet::iterator it = model_cells.begin(), end = model_cells.end(); it != end; ++it)
@@ -584,16 +598,16 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   //   occupied_cells.erase(*it);
 
   /* occupied cells are not free */
-  for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
-    free_cells.erase(*it);
+  // for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
+  //   free_cells.erase(*it);
 
   tree_->lockWrite();
 
   try
   {
     /* mark free cells only if not seen occupied in this cloud */
-    for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it)
-      tree_->updateNode(*it, false);
+    // for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it)
+    //   tree_->updateNode(*it, false);
 
     /* now mark all occupied cells */
     for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
@@ -611,6 +625,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   tree_->unlockWrite();
   tree_->triggerUpdateCallback();
 
+  mid2 = ros::WallTime::now();
   if (filtered_cloud)
   {
     sensor_msgs::PointCloud2Modifier pcd_modifier(*filtered_cloud);
@@ -618,7 +633,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     filtered_cloud_publisher_.publish(*filtered_cloud);
   }
   ROS_INFO("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid - start).toSec() * 1000.0,  (mid1 - mid).toSec() * 1000.0, (mid2 - mid1).toSec() * 1000.0, (ros::WallTime::now() - start).toSec() * 1000.0);
-  gvl->visualizeMap("maskVoxelList");
-  gvl->visualizeMap("pointCloudVoxelList");
+  // gvl->visualizeMap("maskVoxelList");
+  // gvl->visualizeMap("pointCloudVoxelList");
 }
 }  // namespace occupancy_map_monitor
