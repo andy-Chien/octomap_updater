@@ -216,6 +216,26 @@ ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstP
     }
     case shapes::MESH:
     {
+      const shapes::Mesh* mesh = static_cast<const shapes::Mesh*>(shape.get());
+      Eigen::Vector3d scale_indx(1, 1, 1);
+       Eigen::Vector3d padding_indx;
+      if (mesh->vertex_count > 1)
+      {
+        double mx = std::numeric_limits<double>::max();
+        Eigen::Vector3d min(mx, mx, mx);
+        Eigen::Vector3d max(-mx, -mx, -mx);
+        unsigned int cnt = mesh->vertex_count * 3;
+        for (unsigned int i = 0; i < cnt; i += 3)
+        {
+          Eigen::Vector3d v(mesh->vertices[i + 0], mesh->vertices[i + 1], mesh->vertices[i + 2]);
+          min = min.cwiseMin(v);
+          max = max.cwiseMax(v);
+        }
+        scale_indx = 1.732 * (max - min).normalized(); //1.732 = sqrt(3)
+      }
+      padding_indx = scale_indx;
+      // Eigen::Vector3d scale_indx = 1 / (bounding_box_length * 1.732);
+      // Eigen::Vector3d scale_indx(1.732 / bounding_box_length[0], 1.732 / bounding_box_length[1], 1.732 / bounding_box_length[2]); //1.732 = sqrt(3)
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr filled_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr mesh_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr down_sample_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
@@ -226,12 +246,20 @@ ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstP
       //   samplePointFromMesh(shape_for_sample, mesh_cloud, POINTS_PER_MESH * scale_);
       //   *filled_cloud += *mesh_cloud;
       // }
+      float scale_x, scale_y, scale_z, padding_x, padding_y, padding_z;
       for(float padding=padding_; padding>-0.01; padding-=0.01)
       {
         for(float scale=scale_; scale>0.05; scale-=0.05)
         {
+          scale_x = (scale > 1) ? 1 + (scale - 1) / scale_indx[0] : scale;
+          scale_y = (scale > 1) ? 1 + (scale - 1) / scale_indx[1] : scale;
+          scale_z = (scale > 1) ? 1 + (scale - 1) / scale_indx[2] : scale;
+          padding_x = (padding > 0) ? padding / scale_indx[0] : padding;
+          padding_y = (padding > 0) ? padding / scale_indx[1] : padding;
+          padding_z = (padding > 0) ? padding / scale_indx[2] : padding;
           shapes::Shape* shape_for_sample = shape->clone();
-          shape_for_sample->scaleAndPadd(scale, padding);
+          static_cast<shapes::Mesh*>(shape_for_sample)->scaleAndPadd(scale_x, scale_y, scale_z, padding_x, padding_y, padding_z);
+          // shape_for_sample->scaleAndPadd(scale, padding);
           samplePointFromMesh(shape_for_sample, mesh_cloud, POINTS_PER_MESH * scale);
           *filled_cloud += *mesh_cloud;
         }
@@ -633,7 +661,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     filtered_cloud_publisher_.publish(*filtered_cloud);
   }
   ROS_INFO("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid - start).toSec() * 1000.0,  (mid1 - mid).toSec() * 1000.0, (mid2 - mid1).toSec() * 1000.0, (ros::WallTime::now() - start).toSec() * 1000.0);
-  // gvl->visualizeMap("maskVoxelList");
+  gvl->visualizeMap("maskVoxelList");
   // gvl->visualizeMap("pointCloudVoxelList");
 }
 }  // namespace occupancy_map_monitor
