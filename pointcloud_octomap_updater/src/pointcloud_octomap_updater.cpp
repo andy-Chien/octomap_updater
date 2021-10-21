@@ -234,22 +234,14 @@ ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstP
         scale_indx = 1.732 * (max - min).normalized(); //1.732 = sqrt(3)
       }
       padding_indx = scale_indx;
-      // Eigen::Vector3d scale_indx = 1 / (bounding_box_length * 1.732);
-      // Eigen::Vector3d scale_indx(1.732 / bounding_box_length[0], 1.732 / bounding_box_length[1], 1.732 / bounding_box_length[2]); //1.732 = sqrt(3)
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr filled_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr mesh_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
       pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr down_sample_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-      // for(float padding=padding_; padding>-0.01; padding-=0.01)
-      // {
-      //   shapes::Shape* shape_for_sample = shape->clone();
-      //   shape_for_sample->scaleAndPadd(scale_, padding);
-      //   samplePointFromMesh(shape_for_sample, mesh_cloud, POINTS_PER_MESH * scale_);
-      //   *filled_cloud += *mesh_cloud;
-      // }
+
       float scale_x, scale_y, scale_z, padding_x, padding_y, padding_z;
       for(float padding=padding_; padding>-0.01; padding-=0.01)
       {
-        for(float scale=scale_; scale>0.05; scale-=0.05)
+        for(float scale=scale_; scale>0.5; scale-=0.05)
         {
           scale_x = (scale > 1) ? 1 + (scale - 1) / scale_indx[0] : scale;
           scale_y = (scale > 1) ? 1 + (scale - 1) / scale_indx[1] : scale;
@@ -473,7 +465,8 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
       }
       catch (tf2::TransformException& ex)
       {
-        ROS_WARN("Lookup Transform Failed, Using Old Transformation");
+        ROS_WARN("Lookup Transform Failed");
+        return;
       }
     }
     else
@@ -488,8 +481,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     return;
   updatePointCloud(cloud_msg, map_h_sensor);
   /* mask out points on the robot */
-  // shape_mask_->maskContainment(*cloud_msg, sensor_origin_eigen, 0.0, max_range_, mask_);
-  // updateMask(*cloud_msg, sensor_origin_eigen, mask_);
   mid = ros::WallTime::now();
   updateShapeMask();
   std::vector<Vector3ui> filtered_point;
@@ -536,48 +527,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   {
     /* do ray tracing to find which cells this point cloud indicates should be free, and which it indicates
      * should be occupied */
-    // for (unsigned int row = 0; row < cloud_msg->height; row += point_subsample_)
-    // {
-    //   unsigned int row_c = row * cloud_msg->width;
-    //   sensor_msgs::PointCloud2ConstIterator<float> pt_iter(*cloud_msg, "x");
-    //   // set iterator to point at start of the current row
-    //   pt_iter += row_c;
-
-    //   for (unsigned int col = 0; col < cloud_msg->width; col += point_subsample_, pt_iter += point_subsample_)
-    //   {
-    //     // if (mask_[row_c + col] == point_containment_filter::ShapeMask::CLIP)
-    //     //  continue;
-
-    //     /* check for NaN */
-    //     if (!std::isnan(pt_iter[0]) && !std::isnan(pt_iter[1]) && !std::isnan(pt_iter[2]))
-    //     {
-    //       /* transform to map frame */
-    //       tf2::Vector3 point_tf = map_h_sensor * tf2::Vector3(pt_iter[0], pt_iter[1], pt_iter[2]);
-
-    //       /* occupied cell at ray endpoint if ray is shorter than max range and this point
-    //          isn't on a part of the robot*/
-    //       if (mask_[row_c + col] == point_containment_filter::ShapeMask::INSIDE)
-    //         model_cells.insert(tree_->coordToKey(point_tf.getX(), point_tf.getY(), point_tf.getZ()));
-    //       else if (mask_[row_c + col] == point_containment_filter::ShapeMask::CLIP)
-    //         clip_cells.insert(tree_->coordToKey(point_tf.getX(), point_tf.getY(), point_tf.getZ()));
-    //       else
-    //       {
-    //         occupied_cells.insert(tree_->coordToKey(point_tf.getX(), point_tf.getY(), point_tf.getZ()));
-    //         // build list of valid points if we want to publish them
-    //         if (filtered_cloud)
-    //         {
-    //           **iter_filtered_x = pt_iter[0];
-    //           **iter_filtered_y = pt_iter[1];
-    //           **iter_filtered_z = pt_iter[2];
-    //           ++filtered_cloud_size;
-    //           ++*iter_filtered_x;
-    //           ++*iter_filtered_y;
-    //           ++*iter_filtered_z;
-    //         }
-    //       }
-    //     }
-    //   }
-    // }
     Vector3f point;
     tf2::Vector3 point_tf;
     for(auto iter_filtered = filtered_point.begin(); iter_filtered!=filtered_point.end(); ++iter_filtered)
@@ -660,8 +609,8 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     pcd_modifier.resize(filtered_cloud_size);
     filtered_cloud_publisher_.publish(*filtered_cloud);
   }
-  ROS_INFO("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid - start).toSec() * 1000.0,  (mid1 - mid).toSec() * 1000.0, (mid2 - mid1).toSec() * 1000.0, (ros::WallTime::now() - start).toSec() * 1000.0);
-  gvl->visualizeMap("maskVoxelList");
+  // ROS_INFO("Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms", (mid - start).toSec() * 1000.0,  (mid1 - mid).toSec() * 1000.0, (mid2 - mid1).toSec() * 1000.0, (ros::WallTime::now() - start).toSec() * 1000.0);
+  // gvl->visualizeMap("maskVoxelList");
   // gvl->visualizeMap("pointCloudVoxelList");
 }
 }  // namespace occupancy_map_monitor
