@@ -38,7 +38,7 @@
 #define MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 
 #define POINTS_PER_MESH 30000
-#define VOXEL_SIDE_LENGTH 0.02f
+#define VOXEL_SIDE_LENGTH 0.015f
 
 #include <ros/ros.h>
 #include <tf2_ros/transform_listener.h>
