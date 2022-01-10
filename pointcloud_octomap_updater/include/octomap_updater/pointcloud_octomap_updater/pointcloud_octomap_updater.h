@@ -37,8 +37,8 @@
 #ifndef MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 #define MOVEIT_PERCEPTION_POINTCLOUD_OCTOMAP_UPDATER_
 
-#define POINTS_PER_MESH 30000
-#define VOXEL_SIDE_LENGTH 0.015f
+#define POINTS_PER_MESH 15000
+#define VOXEL_SIDE_LENGTH 0.02f
 
 #include <ros/ros.h>
 #include <tf2_ros/transform_listener.h>
@@ -58,6 +58,7 @@
 #include <icl_core_config/Config.h>
 #include "octomap_updater/point_containment_filter/shape_mask.h"
 #include <queue>
+#include <set>
 #include <mutex>
 #include <memory>
 
@@ -90,12 +91,15 @@ protected:
   void updateShapeMask();
 private:
   uint16_t addCloudToMPC(const std::vector<Vector3f> &cloud);
+  ShapeHandle checkShapeExist(const shapes::ShapeConstPtr& shape);
   bool getShapeTransform(ShapeHandle h, Eigen::Isometry3d& transform) const;
+  bool updatePointCloud(const sensor_msgs::PointCloud2::ConstPtr &cloud_msg, tf2::Stamped<tf2::Transform> &map_h_sensor);
   void cloudMsgCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
-  void updatePointCloud(const sensor_msgs::PointCloud2::ConstPtr &cloud_msg, tf2::Stamped<tf2::Transform> &map_h_sensor);
   void samplePointFromMesh(const shapes::Shape* shape, pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr target_cloud, int sample_num);
+  void removeShape(ShapeHandle handle);
   void gvlInitialize();
   void stopHelper();
+  void emptyOctomap();
 
   ros::NodeHandle root_nh_;
   ros::NodeHandle private_nh_;
@@ -109,6 +113,7 @@ private:
   std::string point_cloud_topic_;
   std::string robot_state_topic_;
   std::string urdf_path_;
+  bool accept_mesh_;
   double scale_;
   double padding_;
   double max_range_;
@@ -133,23 +138,25 @@ private:
   float voxel_side_length;
   PointCloud my_point_cloud;
   robot::JointValueMap myRobotJointValues;
-  Matrix4f tf;
+
+  // Matrix4f tf;
   Matrix4f init_transform;
   Matrix4f inv_init_transform;
+
   shared_ptr<CountingVoxelList> pointCloudVoxelList;
   shared_ptr<BitVectorVoxelList> maskVoxelList;
-  // shared_ptr<ProbVoxelMap> erodeTempVoxmap;
-  // shared_ptr<ProbVoxelMap> erodeTempVoxmap1;
+
   tf2::Stamped<tf2::Transform> map_h_sensor;
   std::map<ShapeHandle, shapes::Shape*> contain_shape_;
-  std::map<ShapeHandle, int> cloud_indx_;
-  std::map<ShapeHandle, Eigen::Isometry3d> shapes_transform_;
+  // std::map<ShapeHandle, Eigen::Isometry3d> shapes_transform_;
   std::map<ShapeHandle, Eigen::Isometry3d> tmp_shapes_transform_;
-  std::vector<std::vector<Vector3f>> cloud_vector;
+  std::set<ShapeHandle> forget_list_;
+  // std::vector<std::vector<Vector3f>> cloud_vector;
   std::queue<ShapeHandle> empty_handle;
+
   gpu_voxels::MetaPointCloud *shape_mask_mpc;
   gpu_voxels::PointCloud *received_cloud;
-  std::mutex g_mutex;
+  std::mutex mpc_mutex, data_mutex;
 };
 }  // namespace occupancy_map_monitor
 

@@ -145,19 +145,29 @@ uniform_sampling (vtkSmartPointer<vtkPolyData> polydata, std::size_t n_samples, 
     totalArea += vtkTriangle::TriangleArea (p1, p2, p3);
     cumulativeAreas[cellId] = totalArea;
   }
-
   cloud_out.points.resize (n_samples);
   cloud_out.width = static_cast<std::uint32_t> (n_samples);
   cloud_out.height = 1;
+  // std::cout<<"[uniform_sampling]: Start randPSurface"<<std::endl;
   for (std::size_t i = 0; i < n_samples; i++)
   {
     Eigen::Vector3f p;
     Eigen::Vector3f n (0, 0, 0);
     Eigen::Vector3f c (0, 0, 0);
-    randPSurface (polydata, &cumulativeAreas, totalArea, p, calc_normal, n, calc_color, c);
-    cloud_out[i].x = p[0];
-    cloud_out[i].y = p[1];
-    cloud_out[i].z = p[2];
+    try
+    {
+      randPSurface (polydata, &cumulativeAreas, totalArea, p, calc_normal, n, calc_color, c);
+    }
+    catch(...)
+    {
+      i -= 1;
+      std::cout<<"FUCK FAILED"<<std::endl;
+      std::cout<<"\033[1;31m[uniform_sampling]: randPSurface failed!!!\033[0m"<<std::endl;
+      continue;
+    }
+    cloud_out[i].x = p[0]; //0;//
+    cloud_out[i].y = p[1]; //0;//
+    cloud_out[i].z = p[2]; //0;//
     if (calc_normal)
     {
       cloud_out[i].normal_x = n[0];
@@ -171,5 +181,6 @@ uniform_sampling (vtkSmartPointer<vtkPolyData> polydata, std::size_t n_samples, 
       cloud_out[i].b = static_cast<std::uint8_t>(c[2]);
     }
   }
+  // std::cout<<"[uniform_sampling]: Ended randPSurface"<<std::endl;
   
 }
