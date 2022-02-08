@@ -39,155 +39,69 @@
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include "octomap_updater/point_containment_filter/shape_mask.h"
 
-point_containment_filter::ShapeMask::ShapeMask(const TransformCallback& transform_callback)
-  : transform_callback_(transform_callback), next_handle_(1), min_handle_(1)
+point_containment_filter::ShapeMask::ShapeMask()
 {
 }
 
 point_containment_filter::ShapeMask::~ShapeMask()
 {
-  freeMemory();
 }
 
-void point_containment_filter::ShapeMask::freeMemory()
-{
-  for (std::set<SeeShape>::const_iterator it = bodies_.begin(); it != bodies_.end(); ++it)
-    delete it->body;
-  bodies_.clear();
-}
-
-void point_containment_filter::ShapeMask::setTransformCallback(const TransformCallback& transform_callback)
+bool point_containment_filter::ShapeMask::addShape(const shapes::ShapeConstPtr& shape, std::vector<gpu_voxels::Vector3f>& contain_points, 
+                                                    float voxel_size, float scale, float padding)
 {
   boost::mutex::scoped_lock _(shapes_lock_);
-  transform_callback_ = transform_callback;
-}
+  const shapes::Mesh* mesh = static_cast<const shapes::Mesh*>(shape.get());
+  Eigen::Vector3d scale_indx(1, 1, 1);
+  Eigen::Vector3d padding_indx;
+  if (mesh->vertex_count > 1)
+  {
+    double mx = std::numeric_limits<double>::max();
+    Eigen::Vector3d min(mx, mx, mx);
+    Eigen::Vector3d max(-mx, -mx, -mx);
+    unsigned int cnt = mesh->vertex_count * 3;
+    for (unsigned int i = 0; i < cnt; i += 3)
+    {
+      Eigen::Vector3d v(mesh->vertices[i + 0], mesh->vertices[i + 1], mesh->vertices[i + 2]);
+      min = min.cwiseMin(v);
+      max = max.cwiseMax(v);
+    }
+    scale_indx = 1.732 * (max - min).normalized(); //1.732 = sqrt(3)
+  }
+  padding_indx = scale_indx;
 
-point_containment_filter::ShapeHandle point_containment_filter::ShapeMask::addShape(const shapes::ShapeConstPtr& shape,
-                                                                                    double scale, double padding)
-{
-  boost::mutex::scoped_lock _(shapes_lock_);
+  float scale_x, scale_y, scale_z, padding_x, padding_y, padding_z;
+  scale_x = (scale > 1) ? 1 + (scale - 1) / scale_indx[0] : scale;
+  scale_y = (scale > 1) ? 1 + (scale - 1) / scale_indx[1] : scale;
+  scale_z = (scale > 1) ? 1 + (scale - 1) / scale_indx[2] : scale;
+  padding_x = (padding > 0) ? padding / padding_indx[0] : padding;
+  padding_y = (padding > 0) ? padding / padding_indx[1] : padding;
+  padding_z = (padding > 0) ? padding / padding_indx[2] : padding;
+  shapes::Shape* shape_for_sample = shape->clone();
+  static_cast<shapes::Mesh*>(shape_for_sample)->scaleAndPadd(scale_x, scale_y, scale_z, padding_x, padding_y, padding_z);
+
   SeeShape ss;
-  ss.body = bodies::createBodyFromShape(shape.get());
+  ss.body = bodies::createBodyFromShape(shape_for_sample);
   if (ss.body)
   {
-    ss.body->setScale(scale);
-    ss.body->setPadding(padding);
     ss.volume = ss.body->computeVolume();
-    ss.handle = next_handle_;
-    std::pair<std::set<SeeShape, SortBodies>::iterator, bool> insert_op = bodies_.insert(ss);
-    if (!insert_op.second)
-      ROS_ERROR("Internal error in management of bodies in ShapeMask. This is a serious error.");
-    used_handles_[next_handle_] = insert_op.first;
-  }
-  else
-    return 0;
-
-  ShapeHandle ret = next_handle_;
-  const std::size_t sz = min_handle_ + bodies_.size() + 1;
-  for (std::size_t i = min_handle_; i < sz; ++i)
-    if (used_handles_.find(i) == used_handles_.end())
+    bodies::AABB bounding_box;
+    ss.body->computeBoundingBox(bounding_box);
+    for(float x = bounding_box.min()[0]; x < bounding_box.max()[0] + voxel_size; x += voxel_size / 2)
     {
-      next_handle_ = i;
-      break;
-    }
-  min_handle_ = next_handle_;
-
-  return ret;
-}
-
-void point_containment_filter::ShapeMask::removeShape(ShapeHandle handle)
-{
-  boost::mutex::scoped_lock _(shapes_lock_);
-  std::map<ShapeHandle, std::set<SeeShape, SortBodies>::iterator>::iterator it = used_handles_.find(handle);
-  if (it != used_handles_.end())
-  {
-    delete it->second->body;
-    bodies_.erase(it->second);
-    used_handles_.erase(it);
-    min_handle_ = handle;
-  }
-  else
-    ROS_ERROR("Unable to remove shape handle %u", handle);
-}
-
-void point_containment_filter::ShapeMask::maskContainment(const sensor_msgs::PointCloud2& data_in,
-                                                          const Eigen::Vector3d& sensor_origin,
-                                                          const double min_sensor_dist, const double max_sensor_dist,
-                                                          std::vector<int>& mask)
-{
-  ros::Time a1, a2, a3, a4, a5;
-  a1 = ros::Time::now();
-  boost::mutex::scoped_lock _(shapes_lock_);
-  const unsigned int np = data_in.data.size() / data_in.point_step;
-  mask.resize(np);
-
-  if (bodies_.empty())
-    std::fill(mask.begin(), mask.end(), (int)OUTSIDE);
-  else
-  {
-    Eigen::Isometry3d tmp;
-    bspheres_.resize(bodies_.size());
-    std::size_t j = 0;
-    for (std::set<SeeShape>::const_iterator it = bodies_.begin(); it != bodies_.end(); ++it)
-    {
-      if (!transform_callback_(it->handle, tmp))
+      for(float y = bounding_box.min()[1]; y < bounding_box.max()[1] + voxel_size; y += voxel_size / 2)
       {
-        if (!it->body)
-          ROS_ERROR_STREAM_NAMED("shape_mask",
-                                 "Missing transform for shape with handle " << it->handle << " without a body");
-        else
-          ROS_ERROR_STREAM_NAMED("shape_mask", "Missing transform for shape " << it->body->getType() << " with handle "
-                                                                              << it->handle);
-      }
-      else
-      {
-        it->body->setPose(tmp);
-        it->body->computeBoundingSphere(bspheres_[j++]);
+        for(float z = bounding_box.min()[2]; z < bounding_box.max()[2] + voxel_size; z += voxel_size / 2)
+        {
+          if (ss.body->containsPoint(Eigen::Vector3d(x, y, z)))
+          {
+            contain_points.push_back(gpu_voxels::Vector3f(x, y, z));
+          }
+        }
       }
     }
-
-    // compute a sphere that bounds the entire robot
-    bodies::BoundingSphere bound;
-    bodies::mergeBoundingSpheres(bspheres_, bound);
-    const double radius_squared = bound.radius * bound.radius;
-
-    // we now decide which points we keep
-    sensor_msgs::PointCloud2ConstIterator<float> iter_x(data_in, "x");
-    sensor_msgs::PointCloud2ConstIterator<float> iter_y(data_in, "y");
-    sensor_msgs::PointCloud2ConstIterator<float> iter_z(data_in, "z");
-
-    // Cloud iterators are not incremented in the for loop, because of the pragma
-    // Comment out below parallelization as it can result in very high CPU consumption
-    //#pragma omp parallel for schedule(dynamic)
-    for (int i = 0; i < (int)np; ++i)
-    {
-      Eigen::Vector3d pt = Eigen::Vector3d(*(iter_x + i), *(iter_y + i), *(iter_z + i));
-      double d = pt.norm();
-      int out = OUTSIDE;
-      if (d < min_sensor_dist || d > max_sensor_dist)
-        out = CLIP;
-      else if ((bound.center - pt).squaredNorm() < radius_squared)
-        for (std::set<SeeShape>::const_iterator it = bodies_.begin(); it != bodies_.end() && out == OUTSIDE; ++it)
-          if (it->body->containsPoint(pt))
-            out = INSIDE;
-      mask[i] = out;
-    }
-    // std::cout<<"a1 time = "<<(a3 - a2).toSec() * 1000<<" ms, a2 time = "<<(a5 - a4).toSec() * 1000<<" ms, point size = "<<np<<", body size = "<<bodies_.size()<<std::endl;
   }
-}
-
-int point_containment_filter::ShapeMask::getMaskContainment(const Eigen::Vector3d& pt) const
-{
-  boost::mutex::scoped_lock _(shapes_lock_);
-
-  int out = OUTSIDE;
-  for (std::set<SeeShape>::const_iterator it = bodies_.begin(); it != bodies_.end() && out == OUTSIDE; ++it)
-    if (it->body->containsPoint(pt))
-      out = INSIDE;
-  return out;
-}
-
-int point_containment_filter::ShapeMask::getMaskContainment(double x, double y, double z) const
-{
-  return getMaskContainment(Eigen::Vector3d(x, y, z));
+  else
+    return false;
+  return true;
 }

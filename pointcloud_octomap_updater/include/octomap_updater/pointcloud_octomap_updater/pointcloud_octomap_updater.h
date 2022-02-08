@@ -116,6 +116,8 @@ private:
   bool accept_mesh_;
   double scale_;
   double padding_;
+  double attached_offset_;
+  double attached_scale_;
   double max_range_;
   unsigned int point_subsample_;
   double max_update_rate_;
@@ -139,7 +141,6 @@ private:
   PointCloud my_point_cloud;
   robot::JointValueMap myRobotJointValues;
 
-  // Matrix4f tf;
   Matrix4f init_transform;
   Matrix4f inv_init_transform;
 
@@ -148,10 +149,8 @@ private:
 
   tf2::Stamped<tf2::Transform> map_h_sensor;
   std::map<ShapeHandle, shapes::Shape*> contain_shape_;
-  // std::map<ShapeHandle, Eigen::Isometry3d> shapes_transform_;
   std::map<ShapeHandle, Eigen::Isometry3d> tmp_shapes_transform_;
   std::set<ShapeHandle> forget_list_;
-  // std::vector<std::vector<Vector3f>> cloud_vector;
   std::queue<ShapeHandle> empty_handle;
 
   gpu_voxels::MetaPointCloud *shape_mask_mpc;

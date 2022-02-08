@@ -58,6 +58,8 @@ PointCloudOctomapUpdaterFast::PointCloudOctomapUpdaterFast()
   , max_range_(std::numeric_limits<double>::infinity())
   , point_subsample_(1)
   , max_update_rate_(0)
+  , attached_offset_(0.1)
+  , attached_scale_(1.2)
   , point_cloud_subscriber_(nullptr)
   , point_cloud_filter_(nullptr)
 {
@@ -84,6 +86,10 @@ bool PointCloudOctomapUpdaterFast::setParams(XmlRpc::XmlRpcValue& params)
       readXmlParam(params, "max_update_rate", &max_update_rate_);
     if (params.hasMember("filtered_cloud_topic"))
       filtered_cloud_topic_ = static_cast<const std::string&>(params["filtered_cloud_topic"]);
+    if (params.hasMember("attached_offset"))
+      readXmlParam(params, "attached_offset", &attached_offset_);
+    if (params.hasMember("attached_scale"))
+      readXmlParam(params, "attached_scale", &attached_scale_);
   }
   catch (XmlRpc::XmlRpcException& ex)
   {
@@ -100,7 +106,7 @@ bool PointCloudOctomapUpdaterFast::initialize()
   tf_buffer_.reset(new tf2_ros::Buffer());
   tf_listener_.reset(new tf2_ros::TransformListener(*tf_buffer_, root_nh_));
   shape_mask_.reset(new point_containment_filter::ShapeMask());
-  shape_mask_->setTransformCallback(boost::bind(&PointCloudOctomapUpdaterFast::getShapeTransform, this, _1, _2));
+  // shape_mask_->setTransformCallback(boost::bind(&PointCloudOctomapUpdaterFast::getShapeTransform, this, _1, _2));
   if (!filtered_cloud_topic_.empty())
     filtered_cloud_publisher_ = private_nh_.advertise<sensor_msgs::PointCloud2>(filtered_cloud_topic_, 10, false);
   gvlInitialize();
@@ -193,10 +199,10 @@ ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstP
     {
       accept_mesh_ = false;
       const double *size = static_cast<const shapes::Box*>(shape.get())->size;
-      Vector3f center_min = Vector3f(-1*scale_*size[0]/2 - padding_, -1*scale_*size[1]/2 - padding_, -1*scale_*size[2]/2 - padding_);
-      Vector3f center_max = Vector3f(scale_*size[0]/2 + padding_, scale_*size[1]/2 + padding_, scale_*size[2]/2 + padding_);
+      Vector3f center_min = Vector3f(-1*attached_scale_*size[0]/2 - attached_offset_, -1*attached_scale_*size[1]/2 - attached_offset_, -1*attached_scale_*size[2]/2 - attached_offset_);
+      Vector3f center_max = Vector3f(attached_scale_*size[0]/2 + attached_offset_, attached_scale_*size[1]/2 + attached_offset_, attached_scale_*size[2]/2 + attached_offset_);
       shape_handle = addCloudToMPC(gpu_voxels::geometry_generation::createBoxOfPoints(center_min, center_max, voxel_side_length));
-      ROS_DEBUG("[Octomap Updater]: Created new shape of BOX, handle is %i", shape_handle);
+      ROS_WARN("[Octomap Updater]: Created new shape of BOX, handle is %i", shape_handle);
       break;
     }
     case shapes::SPHERE:
@@ -223,56 +229,16 @@ ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstP
         add_shape_success = false;
         break;
       }
-      const shapes::Mesh* mesh = static_cast<const shapes::Mesh*>(shape.get());
-      Eigen::Vector3d scale_indx(1, 1, 1);
-       Eigen::Vector3d padding_indx;
-      if (mesh->vertex_count > 1)
-      {
-        double mx = std::numeric_limits<double>::max();
-        Eigen::Vector3d min(mx, mx, mx);
-        Eigen::Vector3d max(-mx, -mx, -mx);
-        unsigned int cnt = mesh->vertex_count * 3;
-        for (unsigned int i = 0; i < cnt; i += 3)
-        {
-          Eigen::Vector3d v(mesh->vertices[i + 0], mesh->vertices[i + 1], mesh->vertices[i + 2]);
-          min = min.cwiseMin(v);
-          max = max.cwiseMax(v);
-        }
-        scale_indx = 1.732 * (max - min).normalized(); //1.732 = sqrt(3)
-      }
-      padding_indx = scale_indx;
-      pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr filled_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-      pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr mesh_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
-      pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr down_sample_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>);
 
-      float scale_x, scale_y, scale_z, padding_x, padding_y, padding_z;
-      for(float padding=padding_; padding>-0.01; padding-=0.01)
+      std::vector<Vector3f> model_coordinates_tmp;
+      if (shape_mask_)
       {
-        for(float scale=scale_; scale>0.1; scale-=0.03)
-        {
-          if(padding > 0.01 && scale < 0.9)
-            continue;
-          scale_x = (scale > 1) ? 1 + (scale - 1) / scale_indx[0] : scale;
-          scale_y = (scale > 1) ? 1 + (scale - 1) / scale_indx[1] : scale;
-          scale_z = (scale > 1) ? 1 + (scale - 1) / scale_indx[2] : scale;
-          padding_x = (padding > 0) ? padding / scale_indx[0] : padding;
-          padding_y = (padding > 0) ? padding / scale_indx[1] : padding;
-          padding_z = (padding > 0) ? padding / scale_indx[2] : padding;
-          shapes::Shape* shape_for_sample = shape->clone();
-          static_cast<shapes::Mesh*>(shape_for_sample)->scaleAndPadd(scale_x, scale_y, scale_z, padding_x, padding_y, padding_z);
-          // shape_for_sample->scaleAndPadd(scale, padding);
-          samplePointFromMesh(shape_for_sample, mesh_cloud, POINTS_PER_MESH * scale);
-          *filled_cloud += *mesh_cloud;
-        }
+        bool add_shape_success = shape_mask_->addShape(shape, model_coordinates_tmp, voxel_side_length, scale_, padding_);
+        shape_handle = addCloudToMPC(model_coordinates_tmp);
       }
-      pcl::VoxelGrid<pcl::PointXYZRGBNormal> vg;
-      vg.setInputCloud(filled_cloud);
-      vg.setLeafSize(voxel_side_length / 2, voxel_side_length / 2, voxel_side_length / 2);
-      vg.filter(*down_sample_cloud);
-      std::vector<Vector3f> model_coordinates;
-      for(auto cloud_it=down_sample_cloud->begin(); cloud_it!=down_sample_cloud->end(); ++cloud_it)
-        model_coordinates.push_back(Vector3f(cloud_it->x, cloud_it->y, cloud_it->z));
-      shape_handle = addCloudToMPC(model_coordinates);
+      else
+        ROS_ERROR("Shape filter not yet initialized!");
+
       ROS_INFO("[Octomap Updater]: Created new shape of mesh, handle is %i", shape_handle);
       break;
     }
@@ -288,7 +254,6 @@ ShapeHandle PointCloudOctomapUpdaterFast::excludeShape(const shapes::ShapeConstP
   {
     std::unique_lock<std::mutex> data_lock(data_mutex);
     contain_shape_.insert(std::pair<ShapeHandle, shapes::Shape*>(shape_handle, shape->clone()));
-    // shapes_transform_.insert(std::pair<ShapeHandle, Eigen::Isometry3d>(shape_handle, Eigen::Isometry3d(Eigen::Isometry3d::Identity())));
     tmp_shapes_transform_.insert(std::pair<ShapeHandle, Eigen::Isometry3d>(shape_handle, Eigen::Isometry3d(Eigen::Isometry3d::Identity())));
   }
   return shape_handle;
@@ -353,6 +318,7 @@ ShapeHandle PointCloudOctomapUpdaterFast::checkShapeExist(const shapes::ShapeCon
   }
   return shape_handle;
 }
+
 void PointCloudOctomapUpdaterFast::samplePointFromMesh(const shapes::Shape* shape, pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr target_cloud, int sample_num)
 {
   pcl::PolygonMesh polygon_mesh;
@@ -386,8 +352,8 @@ void PointCloudOctomapUpdaterFast::samplePointFromMesh(const shapes::Shape* shap
 
 uint16_t PointCloudOctomapUpdaterFast::addCloudToMPC(const std::vector<Vector3f> &cloud)
 {
-  std::unique_lock<std::mutex> mpc_lock(mpc_mutex);
   std::unique_lock<std::mutex> data_lock(data_mutex);
+  std::unique_lock<std::mutex> mpc_lock(mpc_mutex);
   uint16_t cloud_id = 0;
   shape_mask_mpc->syncToHost();
   if(empty_handle.empty())
@@ -412,12 +378,10 @@ void PointCloudOctomapUpdaterFast::removeShape(ShapeHandle handle)
   ROS_DEBUG("[Octomap Updater]: Remove old shape, handle is %i", handle);
   if(contain_shape_.find(handle) != contain_shape_.end())
     contain_shape_.erase(handle);
-  // shapes_transform_.erase(handle);
   if(tmp_shapes_transform_.find(handle) != tmp_shapes_transform_.end())
     tmp_shapes_transform_.erase(handle);
   std::vector<Vector3f> empty_cloud;
 
-  std::unique_lock<std::mutex> mpc_lock(mpc_mutex);
   shape_mask_mpc->syncToHost();
   shape_mask_mpc->updatePointCloud(handle, empty_cloud);
   shape_mask_mpc->syncToDevice();
@@ -426,7 +390,6 @@ void PointCloudOctomapUpdaterFast::removeShape(ShapeHandle handle)
 
 void PointCloudOctomapUpdaterFast::forgetShape(ShapeHandle handle)
 {
-  
   ROS_DEBUG("[Octomap Updater]: Forget shape, handle is %i", handle);
   std::unique_lock<std::mutex> data_lock(data_mutex);
   if(contain_shape_.find(handle) != contain_shape_.end())
@@ -474,17 +437,12 @@ bool PointCloudOctomapUpdaterFast::updatePointCloud(const sensor_msgs::PointClou
 
 void PointCloudOctomapUpdaterFast::updateShapeMask()
 {
-  ROS_DEBUG("[Octomap Updater]: Into updateShapeMask");
   std::unique_lock<std::mutex> data_lock(data_mutex);
+  std::unique_lock<std::mutex> mpc_lock(mpc_mutex);
   for(auto it = contain_shape_.begin(); it != contain_shape_.end(); ++it)
   {
-    // data_mutex.lock();
     if(forget_list_.find(it->first) != forget_list_.end())
-    {
-      // data_mutex.unlock();
       continue;
-    }
-    // data_mutex.unlock();
 
     Eigen::Isometry3d tmp, now;
     if(!getShapeTransform(it->first, now))
@@ -498,12 +456,9 @@ void PointCloudOctomapUpdaterFast::updateShapeMask()
                             tmp.matrix().coeff(2,0), tmp.matrix().coeff(2,1), tmp.matrix().coeff(2,2), tmp.matrix().coeff(2,3),
                             tmp.matrix().coeff(3,0), tmp.matrix().coeff(3,1), tmp.matrix().coeff(3,2), tmp.matrix().coeff(3,3));
     Matrix4f transformation_1 = init_transform * transformation * inv_init_transform;
-
-    std::unique_lock<std::mutex> mpc_lock(mpc_mutex);
     shape_mask_mpc->transformSelfSubCloud(it->first, &transformation_1);
     tmp_shapes_transform_[it->first] = now;
   }
-  std::unique_lock<std::mutex> mpc_lock(mpc_mutex);
   maskVoxelList->clearMap();
   maskVoxelList->insertMetaPointCloud(*shape_mask_mpc, eBVM_SWEPT_VOLUME_START);
 }
@@ -647,6 +602,7 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
 
   {
     std::unique_lock<std::mutex> data_lock(data_mutex);
+    std::unique_lock<std::mutex> mpc_lock(mpc_mutex);
     for(auto it=forget_list_.begin(); it!=forget_list_.end();)
     {
       removeShape(*it);
@@ -657,11 +613,12 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   /* mask out points on the robot */
   mid = ros::WallTime::now();
   updateShapeMask();
+  mid1 = ros::WallTime::now();
   std::vector<Vector3ui> filtered_point;
   pointCloudVoxelList->as<voxellist::CountingVoxelList>()->subtractFromCountingVoxelList(
         maskVoxelList->as<voxellist::BitVectorVoxelList>(), Vector3i());
   pointCloudVoxelList->copyCoordsToHost(filtered_point);
-  mid1 = ros::WallTime::now();
+  mid2 = ros::WallTime::now();
   
   if(filtered_point.size() == 0)
   {
@@ -694,21 +651,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
         ++*iter_filtered_z;
       }
     }
-
-    /* compute the free cells along each ray that ends at an occupied cell */
-    // for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
-    //   if (tree_->computeRayKeys(sensor_origin, tree_->keyToCoord(*it), key_ray_))
-    //     free_cells.insert(key_ray_.begin(), key_ray_.end());
-
-    // /* compute the free cells along each ray that ends at a model cell */
-    // for (octomap::KeySet::iterator it = model_cells.begin(), end = model_cells.end(); it != end; ++it)
-    //   if (tree_->computeRayKeys(sensor_origin, tree_->keyToCoord(*it), key_ray_))
-    //     free_cells.insert(key_ray_.begin(), key_ray_.end());
-
-    // /* compute the free cells along each ray that ends at a clipped cell */
-    // for (octomap::KeySet::iterator it = clip_cells.begin(), end = clip_cells.end(); it != end; ++it)
-    //   if (tree_->computeRayKeys(sensor_origin, tree_->keyToCoord(*it), key_ray_))
-    //     free_cells.insert(key_ray_.begin(), key_ray_.end());
   }
   catch (...)
   {
@@ -716,31 +658,13 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
     return;
   }
   tree_->unlockRead();
-
-  // /* cells that overlap with the model are not occupied */
-  // for (octomap::KeySet::iterator it = model_cells.begin(), end = model_cells.end(); it != end; ++it)
-  //   occupied_cells.erase(*it);
-
-  /* occupied cells are not free */
-  // for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
-  //   free_cells.erase(*it);
-
   tree_->lockWrite();
 
   try
   {
-    /* mark free cells only if not seen occupied in this cloud */
-    // for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it)
-    //   tree_->updateNode(*it, false);
-
     /* now mark all occupied cells */
     for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; ++it)
       tree_->updateNode(*it, true);
-
-    // // set the logodds to the minimum for the cells that are part of the model
-    // const float lg = tree_->getClampingThresMinLog() - tree_->getClampingThresMaxLog();
-    // for (octomap::KeySet::iterator it = model_cells.begin(), end = model_cells.end(); it != end; ++it)
-    //   tree_->updateNode(*it, lg);
   }
   catch (...)
   {
@@ -748,7 +672,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   }
   tree_->unlockWrite();
   tree_->triggerUpdateCallback();
-  mid2 = ros::WallTime::now();
   if (filtered_cloud)
   {
     sensor_msgs::PointCloud2Modifier pcd_modifier(*filtered_cloud);
@@ -757,7 +680,6 @@ void PointCloudOctomapUpdaterFast::cloudMsgCallback(const sensor_msgs::PointClou
   }
   if((ros::WallTime::now() - start).toSec() * 1000.0 > 100)
     ROS_WARN("[Octomap Updater]: Slow octomap update, spend %lf ms", (ros::WallTime::now() - start).toSec() * 1000.0);
-  ROS_DEBUG("[Octomap Updater]: Processed point cloud in %lf ms and %lf ms and %lf ms and %lf ms\n", (mid - start).toSec() * 1000.0,  (mid1 - mid).toSec() * 1000.0, (mid2 - mid1).toSec() * 1000.0, (ros::WallTime::now() - start).toSec() * 1000.0);
   // gvl->visualizeMap("maskVoxelList");
   // gvl->visualizeMap("pointCloudVoxelList");
 }

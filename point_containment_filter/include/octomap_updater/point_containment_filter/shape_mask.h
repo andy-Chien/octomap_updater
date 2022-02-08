@@ -39,6 +39,7 @@
 
 #include <sensor_msgs/PointCloud2.h>
 #include <geometric_shapes/bodies.h>
+#include <gpu_voxels/helpers/cuda_vectors.h>
 #include <boost/function.hpp>
 #include <vector>
 #include <set>
@@ -62,33 +63,16 @@ public:
     CLIP = 2
   };
 
-  typedef boost::function<bool(ShapeHandle, Eigen::Isometry3d&)> TransformCallback;
+  // typedef boost::function<bool(ShapeHandle, Eigen::Isometry3d&)> TransformCallback;
 
   /** \brief Construct the filter */
-  ShapeMask(const TransformCallback& transform_callback = TransformCallback());
+  ShapeMask();
 
   /** \brief Destructor to clean up */
   virtual ~ShapeMask();
 
-  ShapeHandle addShape(const shapes::ShapeConstPtr& shape, double scale = 1.0, double padding = 0.0);
-  void removeShape(ShapeHandle handle);
-
-  void setTransformCallback(const TransformCallback& transform_callback);
-
-  /** \brief Compute the containment mask (INSIDE or OUTSIDE) for a given pointcloud. If a mask element is INSIDE, the
-     point
-      is inside the robot. The point is outside if the mask element is OUTSIDE.
-  */
-  void maskContainment(const sensor_msgs::PointCloud2& data_in, const Eigen::Vector3d& sensor_pos,
-                       const double min_sensor_dist, const double max_sensor_dist, std::vector<int>& mask);
-
-  /** \brief Get the containment mask (INSIDE or OUTSIDE) value for an individual point.
-      It is assumed the point is in the frame corresponding to the TransformCallback */
-  int getMaskContainment(double x, double y, double z) const;
-
-  /** \brief Get the containment mask (INSIDE or OUTSIDE) value for an individual point.
-      It is assumed the point is in the frame corresponding to the TransformCallback */
-  int getMaskContainment(const Eigen::Vector3d& pt) const;
+  bool addShape(const shapes::ShapeConstPtr& shape, std::vector<gpu_voxels::Vector3f>& contain_points, 
+                float voxel_size, float scale, float padding);
 
 protected:
   struct SeeShape
@@ -103,66 +87,8 @@ protected:
     double volume;
   };
 
-  struct SortBodies
-  {
-    bool operator()(const SeeShape& b1, const SeeShape& b2) const
-    {
-      if (b1.volume > b2.volume)
-        return true;
-      if (b1.volume < b2.volume)
-        return false;
-      return b1.handle < b2.handle;
-    }
-  };
-
-  TransformCallback transform_callback_;
-
   /** \brief Protects, bodies_ and bspheres_. All public methods acquire this mutex for their whole duration. */
   mutable boost::mutex shapes_lock_;
-  std::set<SeeShape, SortBodies> bodies_;
-  std::vector<bodies::BoundingSphere> bspheres_;
-
-private:
-  /** \brief Free memory. */
-  void freeMemory();
-
-  ShapeHandle next_handle_;
-  ShapeHandle min_handle_;
-  std::map<ShapeHandle, std::set<SeeShape, SortBodies>::iterator> used_handles_;
 };
 }  // namespace point_containment_filter
-// template<typename PointT> void
-// toPCLPointCloud2 (const pcl::PointCloud<PointT>& cloud, pcl::PCLPointCloud2& msg)
-// {
-//   // Ease the user's burden on specifying width/height for unorganized datasets
-//   if (cloud.width == 0 && cloud.height == 0)
-//   {
-//     msg.width  = cloud.size ();
-//     msg.height = 1;
-//   }
-//   else
-//   {
-//     assert (cloud.size () == cloud.width * cloud.height);
-//     msg.height = cloud.height;
-//     msg.width  = cloud.width;
-//   }
-
-//   // Fill point cloud binary data (padding and all)
-//   std::size_t data_size = sizeof (PointT) * cloud.size ();
-//   msg.data.resize (data_size);
-//   if (data_size)
-//   {
-//     memcpy(&msg.data[0], &cloud[0], data_size);
-//   }
-
-//   // Fill fields metadata
-//   msg.fields.clear ();
-//   for_each_type<typename traits::fieldList<PointT>::type> (detail::FieldAdder<PointT>(msg.fields));
-
-//   msg.header     = cloud.header;
-//   msg.point_step = sizeof (PointT);
-//   msg.row_step   = (sizeof (PointT) * msg.width);
-//   msg.is_dense   = cloud.is_dense;
-//   /// @todo msg.is_bigendian = ?;
-// }
 #endif
